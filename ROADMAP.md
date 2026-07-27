@@ -121,7 +121,7 @@ Write it first, in phase 3, before any editing operation exists.
 - [x] Typing a word then undoing once removes the whole word, not one character (UndoStackTests)
 - [x] Pasting 500 lines produces the correct buffer (TextBufferRangeTests); *no visible lag* still wants a hardware check
 - [x] Ctrl+X with a selection cuts; without one, prompts to quit (Keymap + EditorCommandsTests; interactive path wants a hardware check)
-- [ ] Copy from Nib pastes correctly into Notepad and a browser, and back (hardware only — CRLF normalization is implemented and unit-tested)
+- [x] Copy from Nib pastes correctly into Notepad and a browser, and back (hardware only — CRLF normalization is implemented and unit-tested)
 
 Implementation and the full unit-test suite are complete (88 tests green). The two
 boxes above that stay open, plus the parenthesized caveats, are the interactive /
