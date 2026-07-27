@@ -102,6 +102,10 @@ internal sealed class Editor
     private readonly EditorCommands _commands;
     private readonly InputReader _reader;
     private readonly List<InputEvent> _batch = new(256);
+    // Modal prompts (Save-as, quit confirm) read input while the main loop is
+    // still enumerating _batch. They must not touch it, or the outer foreach
+    // throws "Collection was modified". Separate buffer, never nested modally.
+    private readonly List<InputEvent> _modalBatch = new(64);
 
     public Editor(ConsoleHost host, TextBuffer buffer)
     {
@@ -219,10 +223,10 @@ internal sealed class Editor
             while (true)
             {
                 Draw();
-                _batch.Clear();
-                if (_reader.ReadBatch(_batch) == 0) continue;
+                _modalBatch.Clear();
+                if (_reader.ReadBatch(_modalBatch) == 0) continue;
 
-                foreach (InputEvent ev in _batch)
+                foreach (InputEvent ev in _modalBatch)
                 {
                     if (ev.Kind == InputEventKind.Resize) { _screen.Resize(ev.Width, ev.Height); continue; }
                     if (ev.Kind != InputEventKind.Key) continue;
@@ -260,10 +264,10 @@ internal sealed class Editor
             while (true)
             {
                 Draw();
-                _batch.Clear();
-                if (_reader.ReadBatch(_batch) == 0) continue;
+                _modalBatch.Clear();
+                if (_reader.ReadBatch(_modalBatch) == 0) continue;
 
-                foreach (InputEvent ev in _batch)
+                foreach (InputEvent ev in _modalBatch)
                 {
                     if (ev.Kind == InputEventKind.Resize) { _screen.Resize(ev.Width, ev.Height); continue; }
                     if (ev.Kind != InputEventKind.Key) continue;
