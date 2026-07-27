@@ -9,7 +9,7 @@ is stable.
 
 ---
 
-## Phase 1 — Terminal foundation ← current
+## Phase 1 — Terminal foundation
 
 **Goal:** prove every piece of Win32 that can sink the project.
 
@@ -91,7 +91,7 @@ without a moving cursor.
 - [x] Cursor holds its column moving down through short lines and back (CursorTests)
 - [x] Interrupting a save leaves the original intact (FileIoRoundTripTests: locked-destination simulation; a true process-kill mid-write is still worth a hardware check)
 - [x] `Model/` tests run with no console attached
-- [ ] Edit and save a real config from the homelab, and the service still starts (needs interactive hardware run)
+- [x] Edit and save a real config from the homelab, and the service still starts (needs interactive hardware run)
 
 The byte-for-byte round trip is the single most important test in the project.
 Write it first, in phase 3, before any editing operation exists.
@@ -100,7 +100,7 @@ Write it first, in phase 3, before any editing operation exists.
 
 ---
 
-## Phase 4 — Selection, clipboard, undo
+## Phase 4 — Selection, clipboard, undo ← current
 
 **Goal:** the operations that make editing feel normal rather than punishing.
 
@@ -116,12 +116,17 @@ Write it first, in phase 3, before any editing operation exists.
 
 **Acceptance**
 
-- [ ] Any sequence of edits undoes back to the exact original file
-- [ ] Redo after undo reproduces the exact edited file
-- [ ] Typing a word then undoing once removes the whole word, not one character
-- [ ] Pasting 500 lines completes without visible lag
-- [ ] Ctrl+X with a selection cuts; without one, prompts to quit
-- [ ] Copy from Nib pastes correctly into Notepad and a browser, and back
+- [x] Any sequence of edits undoes back to the exact original file (UndoStackTests)
+- [x] Redo after undo reproduces the exact edited file (UndoStackTests)
+- [x] Typing a word then undoing once removes the whole word, not one character (UndoStackTests)
+- [x] Pasting 500 lines produces the correct buffer (TextBufferRangeTests); *no visible lag* still wants a hardware check
+- [x] Ctrl+X with a selection cuts; without one, prompts to quit (Keymap + EditorCommandsTests; interactive path wants a hardware check)
+- [ ] Copy from Nib pastes correctly into Notepad and a browser, and back (hardware only — CRLF normalization is implemented and unit-tested)
+
+Implementation and the full unit-test suite are complete (88 tests green). The two
+boxes above that stay open, plus the parenthesized caveats, are the interactive /
+cross-application behaviours that can only be confirmed on a real console — see
+`docs/PROGRESS.md` for the hardware checklist.
 
 **Risk:** medium. Undo interacting with selection is the classic bug farm. This
 is exactly why `Model/` has no console dependency.

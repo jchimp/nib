@@ -18,8 +18,9 @@ public enum EditorAction
 /// <summary>
 /// Translates a key event into an edit/movement (applied immediately through
 /// <see cref="EditorCommands"/>) or an <see cref="EditorAction"/> for the loop to
-/// handle. Phase-3 bindings only: selection, clipboard, and undo (Ctrl+C/V/K/U/Z)
-/// are deliberately swallowed here until phase 4, and Ctrl+X always means quit.
+/// handle. Phase 4 adds selection (Shift+movement, Ctrl+Shift+word), the CUA
+/// clipboard chords, undo/redo, and nano's ^K/^U — so Ctrl+X now means *cut* when
+/// there is a selection and quit only when there isn't.
 /// </summary>
 public static class Keymap
 {
@@ -28,8 +29,9 @@ public static class Keymap
         if (ev.Kind != InputEventKind.Key) return EditorAction.None;
 
         Model.Cursor cur = cmd.Cursor;
+        bool ext = ev.Shift; // Shift held → extend the selection through the move
 
-        if (ev.Alt) return EditorAction.None; // no Alt chords in phase 3
+        if (ev.Alt) return EditorAction.None; // no Alt chords yet
 
         if (ev.Ctrl)
         {
@@ -37,27 +39,39 @@ public static class Keymap
             {
                 case ConsoleKey.S:
                 case ConsoleKey.O: return EditorAction.Save;
-                case ConsoleKey.X: return EditorAction.Quit;
                 case ConsoleKey.G: return EditorAction.Help;
-                case ConsoleKey.Home: cur.DocumentStart(); break;
-                case ConsoleKey.End: cur.DocumentEnd(); break;
-                case ConsoleKey.LeftArrow: cur.WordLeft(); break;
-                case ConsoleKey.RightArrow: cur.WordRight(); break;
-                // Other Ctrl combos are phase-4 keys; swallow them for now.
+
+                case ConsoleKey.X: // cut a selection, otherwise fall through to quit
+                    if (cmd.HasSelection) { cmd.Cut(); return EditorAction.None; }
+                    return EditorAction.Quit;
+
+                case ConsoleKey.C: cmd.Copy(); break;
+                case ConsoleKey.V: cmd.Paste(); break;
+                case ConsoleKey.A: cmd.SelectAll(); break;
+                case ConsoleKey.K: cmd.CutLine(); break;
+                case ConsoleKey.U: cmd.PasteLine(); break;
+                case ConsoleKey.Z: cmd.Undo(); break;
+                case ConsoleKey.Y: cmd.Redo(); break;
+
+                // Ctrl (+Shift) navigation.
+                case ConsoleKey.Home: cmd.Move(cur.DocumentStart, ext); break;
+                case ConsoleKey.End: cmd.Move(cur.DocumentEnd, ext); break;
+                case ConsoleKey.LeftArrow: cmd.Move(cur.WordLeft, ext); break;
+                case ConsoleKey.RightArrow: cmd.Move(cur.WordRight, ext); break;
             }
             return EditorAction.None;
         }
 
         switch (ev.Key)
         {
-            case ConsoleKey.UpArrow: cur.Up(); return EditorAction.None;
-            case ConsoleKey.DownArrow: cur.Down(); return EditorAction.None;
-            case ConsoleKey.LeftArrow: cur.Left(); return EditorAction.None;
-            case ConsoleKey.RightArrow: cur.Right(); return EditorAction.None;
-            case ConsoleKey.Home: cur.Home(); return EditorAction.None;
-            case ConsoleKey.End: cur.End(); return EditorAction.None;
-            case ConsoleKey.PageUp: cmd.PageUp(pageRows); return EditorAction.None;
-            case ConsoleKey.PageDown: cmd.PageDown(pageRows); return EditorAction.None;
+            case ConsoleKey.UpArrow: cmd.Move(cur.Up, ext); return EditorAction.None;
+            case ConsoleKey.DownArrow: cmd.Move(cur.Down, ext); return EditorAction.None;
+            case ConsoleKey.LeftArrow: cmd.Move(cur.Left, ext); return EditorAction.None;
+            case ConsoleKey.RightArrow: cmd.Move(cur.Right, ext); return EditorAction.None;
+            case ConsoleKey.Home: cmd.Move(cur.Home, ext); return EditorAction.None;
+            case ConsoleKey.End: cmd.Move(cur.End, ext); return EditorAction.None;
+            case ConsoleKey.PageUp: cmd.Move(() => cmd.PageUp(pageRows), ext); return EditorAction.None;
+            case ConsoleKey.PageDown: cmd.Move(() => cmd.PageDown(pageRows), ext); return EditorAction.None;
             case ConsoleKey.Enter: cmd.Enter(); return EditorAction.None;
             case ConsoleKey.Backspace: cmd.Backspace(); return EditorAction.None;
             case ConsoleKey.Delete: cmd.Delete(); return EditorAction.None;

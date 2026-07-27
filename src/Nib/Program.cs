@@ -73,7 +73,7 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine("nib — a console text editor (phase 3: editing core)");
+        Console.WriteLine("nib — a console text editor (phase 4: selection, clipboard, undo)");
         Console.WriteLine();
         Console.WriteLine("usage: nib [options] [file]");
         Console.WriteLine();
@@ -81,7 +81,9 @@ internal static class Program
         Console.WriteLine("  -h, --help");
         Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
-        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit; Ctrl+G help.");
+        Console.WriteLine("      Shift+move selects; Ctrl+A select all;");
+        Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
+        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help.");
     }
 }
 
@@ -116,7 +118,8 @@ internal sealed class Editor
         _viewport = new Viewport();
         _cursor = new Cursor(buffer, _viewport.TabWidth);
         _view = new EditorView(_screen, _viewport, buffer, _cursor);
-        _commands = new EditorCommands(buffer, _cursor);
+        _commands = new EditorCommands(buffer, _cursor, new SystemClipboard());
+        _view.Selection = _commands.Selection; // the view paints the live selection
         _reader = new InputReader(host);
     }
 
@@ -142,7 +145,7 @@ internal sealed class Editor
                 {
                     case EditorAction.Save: DoSave(); break;
                     case EditorAction.Quit: if (TryQuit()) return; break;
-                    case EditorAction.Help: _view.Message = "^S/^O Save   ^X Exit   arrows move   Ctrl+arrows word   (full help: later phase)"; break;
+                    case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A"; break;
                 }
             }
 

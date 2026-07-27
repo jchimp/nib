@@ -16,8 +16,11 @@ namespace Nib.Ui;
 /// </summary>
 public sealed class EditorView
 {
-    private static readonly Color BarFg = Color.Rgb(0xE0, 0xE0, 0xE0);
-    private static readonly Color BarBg = Color.Rgb(0x30, 0x30, 0x30);
+    private static readonly Color BarFg = Color.Rgb(0xFF, 0xFF, 0xFF);
+    private static readonly Color BarBg = Color.Rgb(0x00, 0x80, 0x80);
+    // A fixed selection background until phase 5 brings a real theme. Foreground is
+    // left as-is so text stays readable on top of it.
+    private static readonly Color SelectionBg = Color.Rgb(0x26, 0x4F, 0x78);
 
     private readonly Screen _screen;
     private readonly Viewport _viewport;
@@ -29,6 +32,9 @@ public sealed class EditorView
 
     /// <summary>When set, the message row becomes this modal input line and the caret moves into it.</summary>
     public Prompt? ActivePrompt { get; set; }
+
+    /// <summary>The live selection to paint, or null when nothing is selected/available.</summary>
+    public Selection? Selection { get; set; }
 
     /// <summary>Screen cell the hardware cursor should sit on, computed by the last <see cref="Render"/>.</summary>
     public int CursorX { get; private set; }
@@ -62,7 +68,7 @@ public sealed class EditorView
         {
             int line = _viewport.FirstLine + y;
             if (line >= _buffer.LineCount) break; // past EOF: leave the row blank
-            DrawLine(y + 1, _buffer.GetLine(line));
+            DrawLine(y + 1, line, _buffer.GetLine(line));
         }
 
         DrawMessage();
@@ -80,33 +86,49 @@ public sealed class EditorView
 
     // Place each glyph at (displayColumn - FirstColumn), on screen row y. Tabs paint
     // as spaces across their expanded range; other control chars render as a single
-    // placeholder so width-1 column math stays exact.
-    private void DrawLine(int y, string line)
+    // placeholder so width-1 column math stays exact. Cells whose *character* index
+    // falls inside the selection get the selection background.
+    private void DrawLine(int y, int bufferRow, string line)
     {
         int first = _viewport.FirstColumn;
         int width = _screen.Width;
         int col = 0;
+        int charIndex = 0;
+
+        int selStart = 0, selEnd = 0;
+        bool hasSel = Selection is { } sel && sel.ContainsRow(bufferRow, _cursor, out selStart, out selEnd);
 
         foreach (char ch in line)
         {
+            Color bg = hasSel && charIndex >= selStart && charIndex < selEnd ? SelectionBg : Color.Default;
+
             if (ch == '\t')
             {
                 int stop = Viewport.NextTabStop(col, _viewport.TabWidth);
                 for (; col < stop; col++)
                 {
                     int sx = col - first;
-                    if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, Color.Default);
+                    if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, bg);
                 }
             }
             else
             {
                 char glyph = ch < ' ' || ch == '\x7f' ? '?' : ch;
                 int sx = col - first;
-                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, Color.Default, Color.Default);
+                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, Color.Default, bg);
                 col++;
             }
 
+            charIndex++;
             if (col - first >= width) return; // everything else is off the right edge
+        }
+
+        // A selection that runs past this line's text includes its line break — show
+        // that with one trailing highlighted cell.
+        if (hasSel && line.Length < selEnd)
+        {
+            int sx = col - first;
+            if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, SelectionBg);
         }
     }
 

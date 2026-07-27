@@ -129,6 +129,158 @@ public sealed class TextBuffer
         }
     }
 
+    // ---- ranged / multi-line edits (phase 4) --------------------------------
+    // The three verbs undo and paste are built from. GetRange reconstructs the
+    // text *with each line's real terminator*, and InsertMultiline restores those
+    // terminators from the text it is given — so a Delete then Insert of the same
+    // range is byte-for-byte identity. Paste stays consistent by normalizing the
+    // clipboard text to DefaultEnding before it ever reaches here.
+
+    /// <summary>
+    /// The text of [start, end), start ≤ end. Within a line this is a plain
+    /// substring; across lines the crossed terminators are included verbatim so the
+    /// string can be re-inserted to reproduce the original bytes.
+    /// </summary>
+    public string GetRange(TextPosition start, TextPosition end)
+    {
+        if (start.Row == end.Row)
+            return _lines[start.Row].Text.Substring(start.Col, end.Col - start.Col);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append(_lines[start.Row].Text[start.Col..]);
+        sb.Append(_lines[start.Row].Ending.ToChars());
+        for (int r = start.Row + 1; r < end.Row; r++)
+        {
+            sb.Append(_lines[r].Text);
+            sb.Append(_lines[r].Ending.ToChars());
+        }
+        sb.Append(_lines[end.Row].Text[..end.Col]);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Remove [start, end), start ≤ end. Across lines the boundary lines merge; like
+    /// <see cref="JoinWithNext"/> the surviving line keeps the *lower* line's
+    /// terminator, since that terminator now ends the combined line.
+    /// </summary>
+    public void DeleteRange(TextPosition start, TextPosition end)
+    {
+        if (start.Row == end.Row)
+        {
+            if (end.Col > start.Col)
+            {
+                Line only = _lines[start.Row];
+                only.Text = only.Text.Remove(start.Col, end.Col - start.Col);
+                IsModified = true;
+            }
+            return;
+        }
+
+        Line first = _lines[start.Row];
+        Line last = _lines[end.Row];
+        first.Text = first.Text[..start.Col] + last.Text[end.Col..];
+        first.Ending = last.Ending; // the lower line's terminator ends the merged line
+        _lines.RemoveRange(start.Row + 1, end.Row - start.Row);
+        IsModified = true;
+    }
+
+    /// <summary>
+    /// Insert <paramref name="text"/> at <paramref name="at"/> and return the
+    /// position just past it. Line breaks embedded in the text (LF/CRLF/CR) become
+    /// real line terminators, preserved exactly — this is what lets undo restore
+    /// mixed endings. The tail of the split line keeps the original line's ending.
+    /// </summary>
+    public TextPosition InsertMultiline(TextPosition at, string text)
+    {
+        if (text.Length == 0) return at;
+
+        (List<string> segments, List<LineEnding> breaks) = SplitOnEndings(text);
+        Line line = _lines[at.Row];
+
+        if (breaks.Count == 0)
+        {
+            // No embedded newline: a plain in-line insert.
+            line.Text = line.Text.Insert(at.Col, segments[0]);
+            IsModified = true;
+            return new TextPosition(at.Row, at.Col + segments[0].Length);
+        }
+
+        string head = line.Text[..at.Col];
+        string tail = line.Text[at.Col..];
+        LineEnding tailEnding = line.Ending;
+
+        // First segment finishes the head line; it takes the first embedded break.
+        line.Text = head + segments[0];
+        line.Ending = breaks[0];
+
+        // Whole middle segments become their own lines with their own breaks.
+        int row = at.Row;
+        for (int i = 1; i < segments.Count - 1; i++)
+        {
+            row++;
+            _lines.Insert(row, new Line(segments[i], breaks[i]));
+        }
+
+        // Last segment carries the original tail and the original line's ending.
+        string lastSeg = segments[^1];
+        row++;
+        _lines.Insert(row, new Line(lastSeg + tail, tailEnding));
+        IsModified = true;
+        return new TextPosition(row, lastSeg.Length);
+    }
+
+    /// <summary>
+    /// The position just past <paramref name="text"/> if it were laid out starting at
+    /// <paramref name="start"/>. Undo uses this to find the span an edit occupies
+    /// without re-scanning the buffer.
+    /// </summary>
+    public static TextPosition Advance(TextPosition start, string text)
+    {
+        int breaks = 0, lastBreak = -1;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '\n') { breaks++; lastBreak = i; }
+            else if (c == '\r')
+            {
+                breaks++;
+                if (i + 1 < text.Length && text[i + 1] == '\n') i++;
+                lastBreak = i;
+            }
+        }
+        return breaks == 0
+            ? new TextPosition(start.Row, start.Col + text.Length)
+            : new TextPosition(start.Row + breaks, text.Length - lastBreak - 1);
+    }
+
+    // Split text into segments and the break that followed each (all but the last).
+    // \r\n is matched before a bare \r so a CRLF is never read as two breaks.
+    private static (List<string> Segments, List<LineEnding> Breaks) SplitOnEndings(string text)
+    {
+        var segments = new List<string>();
+        var breaks = new List<LineEnding>();
+        int start = 0, i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+            {
+                segments.Add(text[start..i]); breaks.Add(LineEnding.CrLf); i += 2; start = i;
+            }
+            else if (c == '\r')
+            {
+                segments.Add(text[start..i]); breaks.Add(LineEnding.Cr); i++; start = i;
+            }
+            else if (c == '\n')
+            {
+                segments.Add(text[start..i]); breaks.Add(LineEnding.Lf); i++; start = i;
+            }
+            else i++;
+        }
+        segments.Add(text[start..]);
+        return (segments, breaks);
+    }
+
     // Merge row+1 into row: the merged line keeps the *lower* line's terminator,
     // because that terminator now ends the combined line.
     private void JoinWithNext(int row)
