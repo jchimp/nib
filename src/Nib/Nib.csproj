@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>nib</AssemblyName>
+    <RootNamespace>Nib</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- TerminalWriter.Flush pins the frame buffer and hands a char* to WriteConsoleW. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Skips ICU load at startup. Safe because the editor compares strings ordinally. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- "Use LibraryImport instead of DllImport". Deliberate: the source generator
+         does not handle the INPUT_RECORD[] marshalling any more clearly than
+         DllImport does, and we are not targeting NativeAOT. -->
+    <NoWarn>$(NoWarn);SYSLIB1054</NoWarn>
+  </PropertyGroup>
+
+  <!-- The renderer's diff (Screen) and the TerminalWriter test seam are exercised
+       by Nib.Tests without a live console. Internal, not public: this is a test
+       affordance, not part of any API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nib.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- Required once TextMateSharp lands in phase 5: its Oniguruma wrapper is a
+         native DLL, and single-file publish will not bundle native libraries
+         without this. First launch extracts to %TEMP%\.net\nib\<hash>. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- Phase 5 will add:
+       <ItemGroup>
+         <PackageReference Include="TextMateSharp" Version="2.*" />
+         <EmbeddedResource Include="Resources\Grammars\*.json.gz" />
+         <EmbeddedResource Include="Resources\Themes\*.json.gz" />
+       </ItemGroup>
+       Note we do NOT reference TextMateSharp.Grammars — see CLAUDE.md. -->
+
+</Project>

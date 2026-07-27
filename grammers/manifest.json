@@ -1,0 +1,199 @@
+{
+  "$comment": [
+    "Source of truth for Nib's vendored TextMate grammars.",
+    "Every url and scopeName here was verified against the live repositories.",
+    "Total: 19 grammar files, ~777 KB raw, ~95 KB gzipped.",
+    "Regenerate the embedded resources with tools/fetch-grammars.ps1.",
+    "",
+    "We deliberately do NOT take a dependency on the TextMateSharp.Grammars",
+    "NuGet package. It ships 40+ languages and 20 themes we would never open,",
+    "and it is the single biggest contributor to binary size. We take the",
+    "TextMateSharp engine only and bring our own grammars."
+  ],
+
+  "grammars": [
+    {
+      "id": "ini",
+      "scopeName": "source.ini",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/ini/syntaxes/ini.tmLanguage.json",
+      "extensions": [".ini", ".cfg", ".conf", ".properties", ".editorconfig", ".gitconfig", ".inf", ".reg"],
+      "filenames": [".gitconfig", ".npmrc", ".editorconfig"],
+      "bytes": 2376
+    },
+    {
+      "id": "xml",
+      "scopeName": "text.xml",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/xml/syntaxes/xml.tmLanguage.json",
+      "extensions": [".xml", ".xsd", ".xsl", ".xslt", ".csproj", ".vbproj", ".props", ".targets", ".config", ".plist", ".svg", ".resx", ".nuspec"],
+      "bytes": 7699,
+      "note": "Includes source.java for embedded JSP blocks. Unresolved at runtime; degrades to plain text inside those blocks only."
+    },
+    {
+      "id": "toml",
+      "scopeName": "source.toml",
+      "url": "https://raw.githubusercontent.com/tamasfe/taplo/master/editors/vscode/toml.tmLanguage.json",
+      "extensions": [".toml"],
+      "filenames": ["Cargo.lock", "pyproject.toml", "Pipfile"],
+      "bytes": 9212,
+      "note": "VS Code ships no TOML grammar. Taplo's is JSON-format, which matters: TextMateSharp cannot load plist .tmLanguage files, so textmate/toml.tmbundle is unusable."
+    },
+
+    {
+      "id": "yaml",
+      "scopeName": "source.yaml",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml.tmLanguage.json",
+      "extensions": [".yaml", ".yml"],
+      "filenames": ["docker-compose.yml", "docker-compose.yaml", ".gitlab-ci.yml"],
+      "bytes": 3151,
+      "note": "Dispatcher only. Delegates to source.yaml.1.2 and source.yaml.embedded, which cross-reference the 1.0/1.1/1.3 variants. All six files below are required — loading yaml.tmLanguage.json alone produces zero highlighting."
+    },
+    {
+      "id": "yaml-1.2",
+      "scopeName": "source.yaml.1.2",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml-1.2.tmLanguage.json",
+      "extensions": [],
+      "bytes": 41043,
+      "note": "Dependency of source.yaml; never selected directly."
+    },
+    {
+      "id": "yaml-1.1",
+      "scopeName": "source.yaml.1.1",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml-1.1.tmLanguage.json",
+      "extensions": [],
+      "bytes": 41652
+    },
+    {
+      "id": "yaml-1.0",
+      "scopeName": "source.yaml.1.0",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml-1.0.tmLanguage.json",
+      "extensions": [],
+      "bytes": 28644
+    },
+    {
+      "id": "yaml-1.3",
+      "scopeName": "source.yaml.1.3",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml-1.3.tmLanguage.json",
+      "extensions": [],
+      "bytes": 1711
+    },
+    {
+      "id": "yaml-embedded",
+      "scopeName": "source.yaml.embedded",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/yaml/syntaxes/yaml-embedded.tmLanguage.json",
+      "extensions": [],
+      "bytes": 12715
+    },
+
+    {
+      "id": "sql",
+      "scopeName": "source.sql",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/sql/syntaxes/sql.tmLanguage.json",
+      "extensions": [".sql", ".dsql"],
+      "bytes": 27781
+    },
+    {
+      "id": "python",
+      "scopeName": "source.python",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/python/syntaxes/MagicPython.tmLanguage.json",
+      "extensions": [".py", ".pyw", ".pyi", ".rpy"],
+      "shebangs": ["python", "python3"],
+      "bytes": 101610
+    },
+    {
+      "id": "javascript",
+      "scopeName": "source.js",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+      "extensions": [".js", ".mjs", ".cjs", ".jsx"],
+      "shebangs": ["node"],
+      "bytes": 227247,
+      "note": "Largest grammar in the set by a wide margin. Also the most likely to hit the tokenizer timeout on minified files — see the MaxTokenizeTime guidance in CLAUDE.md."
+    },
+    {
+      "id": "rust",
+      "scopeName": "source.rust",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/rust/syntaxes/rust.tmLanguage.json",
+      "extensions": [".rs"],
+      "bytes": 25161
+    },
+    {
+      "id": "go",
+      "scopeName": "source.go",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/go/syntaxes/go.tmLanguage.json",
+      "extensions": [".go"],
+      "bytes": 77243
+    },
+    {
+      "id": "bash",
+      "scopeName": "source.shell",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/shellscript/syntaxes/shell-unix-bash.tmLanguage.json",
+      "extensions": [".sh", ".bash", ".zsh", ".ksh", ".bashrc", ".bash_profile", ".zshrc", ".profile"],
+      "shebangs": ["sh", "bash", "zsh", "ksh"],
+      "bytes": 56349
+    },
+    {
+      "id": "powershell",
+      "scopeName": "source.powershell",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/powershell/syntaxes/powershell.tmLanguage.json",
+      "extensions": [".ps1", ".psm1", ".psd1", ".pssc", ".psrc"],
+      "bytes": 28127
+    },
+    {
+      "id": "batch",
+      "scopeName": "source.batchfile",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/bat/syntaxes/batchfile.tmLanguage.json",
+      "extensions": [".bat", ".cmd"],
+      "bytes": 18501
+    },
+    {
+      "id": "json",
+      "scopeName": "source.json",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/json/syntaxes/JSON.tmLanguage.json",
+      "extensions": [".json", ".jsonc", ".webmanifest", ".jsonl"],
+      "filenames": ["tsconfig.json", "package.json", ".eslintrc.json"],
+      "bytes": 5084
+    },
+    {
+      "id": "markdown",
+      "scopeName": "text.html.markdown",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/markdown-basics/syntaxes/markdown.tmLanguage.json",
+      "extensions": [".md", ".markdown", ".mdown", ".mkd", ".mdwn"],
+      "bytes": 79877,
+      "note": "References 61 external scopes for fenced code blocks. The 13 we ship will highlight inside fences; the rest resolve to nothing and render as plain text. That is the correct degradation, not a bug."
+    }
+  ],
+
+  "themes": [
+    {
+      "id": "dark-plus",
+      "label": "Dark+",
+      "default": true,
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-defaults/themes/dark_plus.json",
+      "includes": ["https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-defaults/themes/dark_vs.json"],
+      "note": "dark_plus.json is a delta over dark_vs.json via an \"include\" key. fetch-grammars.ps1 flattens the chain at vendor time so the runtime loader never has to resolve relative paths."
+    },
+    {
+      "id": "light-plus",
+      "label": "Light+",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-defaults/themes/light_plus.json",
+      "includes": ["https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-defaults/themes/light_vs.json"]
+    },
+    {
+      "id": "monokai",
+      "label": "Monokai",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-monokai/themes/monokai-color-theme.json",
+      "includes": []
+    },
+    {
+      "id": "solarized-dark",
+      "label": "Solarized Dark",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-solarized-dark/themes/solarized-dark-color-theme.json",
+      "includes": []
+    },
+    {
+      "id": "high-contrast",
+      "label": "High Contrast Dark",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/theme-defaults/themes/hc_black.json",
+      "includes": []
+    }
+  ]
+}
