@@ -77,6 +77,21 @@ dotnet publish src/Nib/Nib.csproj -c Release
 # -> src/Nib/bin/Release/net10.0/win-x64/publish/nib.exe
 ```
 
+**Fast dev loop.** `dotnet run` pays ~2–4 s of build-orchestration overhead
+(restore + up-to-date check) on *every* launch. That is the dev harness, not the
+editor: the compiled binary starts in ~150 ms and the startup path is trivial
+(parse args → `FileIo.Load` → `ConsoleHost.Acquire` → first render). To test at
+real speed, build once and run the exe directly:
+
+```powershell
+dotnet build src/Nib/Nib.csproj          # once, after code changes
+./src/Nib/bin/Debug/net10.0/win-x64/nib.exe [file]
+
+# --no-build skips the rebuild but still pays ~1.5 s of MSBuild target
+# resolution — better than a full `dotnet run`, but the direct exe is the win:
+dotnet run --no-build --project src/Nib/Nib.csproj -- [file]
+```
+
 Refresh vendored grammars (not part of the build; the `.gz` files are committed):
 
 ```powershell
