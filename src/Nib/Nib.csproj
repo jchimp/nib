@@ -41,12 +41,20 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- Phase 5 will add:
-       <ItemGroup>
-         <PackageReference Include="TextMateSharp" Version="2.*" />
-         <EmbeddedResource Include="Resources\Grammars\*.json.gz" />
-         <EmbeddedResource Include="Resources\Themes\*.json.gz" />
-       </ItemGroup>
-       Note we do NOT reference TextMateSharp.Grammars — see CLAUDE.md. -->
+  <!-- Engine only. We deliberately do NOT reference TextMateSharp.Grammars: it
+       ships 40+ languages and 20 themes we would never open and is the single
+       biggest contributor to binary size. See CLAUDE.md. -->
+  <ItemGroup>
+    <PackageReference Include="TextMateSharp" Version="1.0.66" />
+  </ItemGroup>
+
+  <!-- Vendored by tools/fetch-grammars.ps1 and committed; not built from source.
+       The manifest rides along as a resource so language detection reads the same
+       extension/filename/shebang table the vendoring script does. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Grammars\*.json.gz" />
+    <EmbeddedResource Include="Resources\Themes\*.json.gz" />
+    <EmbeddedResource Include="..\..\grammars\manifest.json" LogicalName="Nib.Resources.manifest.json" />
+  </ItemGroup>
 
 </Project>
