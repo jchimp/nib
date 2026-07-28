@@ -149,10 +149,26 @@ public sealed class ConsoleHost : IDisposable
         return host;
     }
 
-    private static bool OnConsoleCtrl(uint ctrlType)
+    // internal rather than private so the dispatch table can be asserted without a
+    // console. Safe to call with no host acquired: Restore is null-guarded.
+    internal static bool OnConsoleCtrl(uint ctrlType)
     {
         switch (ctrlType)
         {
+            // Ctrl+C is a copy key here, and swallowing the event says so.
+            //
+            // Clearing ENABLE_PROCESSED_INPUT means this should never arrive at all:
+            // Ctrl+C comes through ReadConsoleInputW as an ordinary key and no
+            // CTRL_C_EVENT is generated. That made the input mode a single point of
+            // failure with nothing behind it — anything that restored the flag for
+            // even a moment would have Windows terminate us mid-edit, with the
+            // buffer unsaved and no prompt. Returning true costs nothing when the
+            // event never fires and saves the user's work when it does.
+            //
+            // Ctrl+Break deliberately still kills, so there is always a way out.
+            case NativeMethods.CTRL_C_EVENT:
+                return true;
+
             case NativeMethods.CTRL_CLOSE_EVENT:
             case NativeMethods.CTRL_LOGOFF_EVENT:
             case NativeMethods.CTRL_SHUTDOWN_EVENT:

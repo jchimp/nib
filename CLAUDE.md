@@ -128,6 +128,23 @@ structured stream. Turning both on means parsing escape sequences for no gain.
 mechanism. With it cleared, Ctrl+C arrives as an ordinary key event and no
 `CTRL_C_EVENT` is generated at all.
 
+The control handler *also* returns `true` for `CTRL_C_EVENT`, which in normal
+operation is dead code — the event never fires. It is there because the input mode
+was otherwise a single point of failure with nothing behind it: anything that
+restored that flag for a moment would have Windows terminate the editor mid-edit
+with the buffer unsaved. Ctrl+Break is left fatal on purpose, so there is always a
+way out.
+
+**A restore path that works makes a crash look like a clean exit.** `Restore()`
+runs on unhandled exceptions too, so an editor that dies on a bug puts the terminal
+back neatly and simply vanishes — no stack trace on screen, no clue anything went
+wrong. That is what made a real crash in the selection code (a stale anchor
+surviving a line join, then Ctrl+C indexing off the end of the buffer) read as "it
+escaped once". The input loop now catches per keystroke, clamps the cursor and
+reports on the message row, because the buffer is still in memory and the user can
+still save it. Do not "clean that up" into a top-level handler — by the time it
+unwinds that far, the buffer is gone.
+
 **Clearing `ENABLE_QUICK_EDIT_MODE` requires setting `ENABLE_EXTENDED_FLAGS` in
 the same call.** Otherwise the clear is silently ignored and you get no mouse
 input with no error.

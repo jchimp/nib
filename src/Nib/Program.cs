@@ -166,17 +166,42 @@ internal sealed class Editor
                 if (ev.Kind == InputEventKind.Resize) { _screen.Resize(ev.Width, ev.Height); continue; }
                 if (ev.Kind == InputEventKind.Mouse) continue; // phase 6
 
-                switch (Keymap.Handle(ev, _commands, pageRows))
+                // A bug in a command must not cost the user their buffer. Before
+                // this, any exception escaping a keystroke unwound out of Main, and
+                // because ConsoleHost restores the terminal on every exit path it
+                // looked like a clean quit rather than a crash — the editor simply
+                // vanished with everything unsaved. Report it on the message row and
+                // keep going: whatever is broken, the buffer is still in memory and
+                // the user can still save it.
+                try
                 {
-                    case EditorAction.Save: DoSave(); break;
-                    case EditorAction.Quit: if (TryQuit()) return; break;
-                    case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Theme: Alt+T"; break;
-                    case EditorAction.CycleTheme: CycleTheme(); break;
+                    switch (Keymap.Handle(ev, _commands, pageRows))
+                    {
+                        case EditorAction.Save: DoSave(); break;
+                        case EditorAction.Quit: if (TryQuit()) return; break;
+                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Theme: Alt+T"; break;
+                        case EditorAction.CycleTheme: CycleTheme(); break;
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    Recover(ex);
                 }
             }
 
             Draw();
         }
+    }
+
+    // A command threw. Put the cursor somewhere legal — MoveTo clamps, and a cursor
+    // left pointing outside the buffer would throw again on the very next frame and
+    // turn one bad keystroke into an unusable editor — then say what happened.
+    // Deliberately not caught around Draw(): if painting is what is broken, there is
+    // nowhere left to report it and looping on it would only hang.
+    private void Recover(Exception ex)
+    {
+        _cursor.MoveTo(_cursor.Row, _cursor.Col);
+        _view.Message = $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save";
     }
 
     // Alt+T. A theme the grammar-less path can't honour just says so rather than
