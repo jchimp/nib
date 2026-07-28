@@ -133,4 +133,69 @@ public class EditorCommandsTests
         cmd.Move(() => cur.Right(), extend: false);
         Assert.False(cmd.HasSelection);
     }
+
+    // ---- stale anchors ------------------------------------------------------
+    // Selection stores a raw anchor position and the buffer can shrink underneath
+    // it. These cover the sequence that used to crash the editor: a selection
+    // gesture the user backed out of leaves an anchor that IsActive calls inactive,
+    // so Backspace took the no-selection path and left it behind; joining two lines
+    // then put it past the end of the buffer, and the next Copy indexed off the end.
+
+    [Fact]
+    public void An_edit_drops_a_collapsed_anchor()
+    {
+        (EditorCommands cmd, TextBuffer _, Cursor cur, _) = Setup("alpha", "beta");
+
+        // Shift+Right then Shift+Left: anchored, but start == end so nothing counts
+        // as selected.
+        cmd.Move(cur.Right, extend: true);
+        cmd.Move(cur.Left, extend: true);
+        Assert.True(cmd.Selection.HasAnchor);
+        Assert.False(cmd.HasSelection);
+
+        cmd.InsertChar('x');
+
+        Assert.False(cmd.Selection.HasAnchor);
+    }
+
+    [Fact]
+    public void Copying_after_a_line_join_that_followed_a_collapsed_selection_does_not_throw()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, FakeClipboard clip) = Setup("alpha", "beta", "gamma");
+
+        cmd.Move(cur.DocumentEnd, extend: false);
+        cmd.Move(cur.Home, extend: false);      // start of the last line
+        cmd.Move(cur.Right, extend: true);      // anchor here...
+        cmd.Move(cur.Left, extend: true);       // ...and collapse back onto it
+
+        cmd.Backspace();                        // joins the last line onto the one above
+        Assert.Equal(2, buf.LineCount);
+        Assert.Equal("betagamma", buf.GetLine(1));
+
+        cmd.Move(cur.Right, extend: true);      // re-extend — must anchor afresh
+        cmd.Copy();
+
+        // The caret sits at the join, so one Shift+Right takes the "g" of "gamma".
+        // Before the fix this threw: the anchor still named row 2, which was gone.
+        Assert.Equal("g", clip.Text);
+    }
+
+    /// <summary>
+    /// Belt and braces for the same class of bug: even handed an anchor pointing past
+    /// the end of the buffer, the selection must clamp rather than index off the end.
+    /// </summary>
+    [Fact]
+    public void A_selection_anchored_past_the_end_of_the_buffer_clamps()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, FakeClipboard clip) = Setup("alpha", "beta", "gamma");
+
+        Select(cmd, cur, 2, 0, 2, 5);
+        buf.DeleteRange(new TextPosition(0, 5), new TextPosition(2, 0)); // collapse to one line
+        cur.MoveTo(0, 0);
+
+        cmd.Copy();  // must not throw
+        cmd.Cut();   // nor this
+
+        Assert.NotNull(clip.Text);
+    }
 }
