@@ -1,21 +1,41 @@
 # Project Progress
 
 ## Current Focus
-Phase 4 (selection, clipboard, undo) implemented and unit-tested (88 tests green). Pending: interactive
-hardware acceptance — visual selection, cross-app clipboard (Notepad/browser), 500-line paste feel,
-and the Ctrl+X cut-or-quit path. Next: phase 5 (syntax highlighting).
+Phase 5 (syntax highlighting) implemented and unit-tested (158 tests green). All automatable ROADMAP
+acceptance for phase 5 passes; the single criterion not met — sub-100 ms startup — is .NET runtime cost
+that predates the phase. Pending: the interactive hardware run for phases 3, 4 and 5. Next: phase 6 (polish).
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
 - [x] Phase 2 — renderer: Screen diff, viewport/scroll, tab expansion, resize, debug frame timer
 - [x] Phase 3 — editing core: TextBuffer, Cursor, FileIo (byte-for-byte round trip covered first), nano chrome, Keymap
 - [x] Phase 4 — selection, clipboard, undo: unified edit model, coalescing undo/redo, selection, CUA + ^K/^U clipboard
+- [x] Phase 5 — syntax highlighting: vendored grammars/themes, lazy GrammarStore, ThemeMap, language detection, convergence-cached incremental tokenization, `--theme` + Alt+T
 - [x] Replaced throwaway `Ui/FileDocument` with `Model/TextBuffer` + `Model/FileIo`
 - [ ] Verify phase-3 ROADMAP acceptance on hardware (interactive; the byte round-trip and column-memory checks are unit-tested, the "edit a homelab config" check is not)
 - [ ] Verify phase-4 ROADMAP acceptance on hardware: (1) Shift/Ctrl+Shift selection paints and collapses; (2) ^C/^X/^V and ^K/^U behave; (3) ^X with no selection still prompts to quit; (4) type-word→^Z→^Y and a long undo-to-original session; (5) paste 500 lines with no visible lag; (6) copy→Notepad/browser and back round-trips endings
+- [ ] Verify phase-5 acceptance on hardware: (1) open each of `tests/fixtures/highlight/sample.*` and confirm the colours look right, not merely present; (2) Alt+T cycles all five themes with no artifacts and the selection background tracks the theme; (3) a large YAML file scrolls without visible lag as the lookahead fills it in; (4) colour is correct in legacy `conhost` as well as Windows Terminal, and degrades cleanly if VT processing cannot be set
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
+- [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
 ## Progress Log
+
+### 2026-07-27 (phase 5)
+- Syntax highlighting landed. `Highlight/` (may reference `Terminal/`, never the reverse): `IHighlighter` + `StyledSpan` + `NullHighlighter`; `GrammarStore` (`IRegistryOptions` over gzipped embedded resources, lazy per scope, negative results cached); `GrammarManifest` (the vendoring manifest re-read at runtime as a 25th resource, so detection tables and vendored files can't drift); `ThemeMap` (wraps TextMateSharp's own `Theme.Match` rather than reimplementing selector specificity); `LanguageDetector`; `TextMateHighlighter`.
+- Vendored 19 grammars + 5 themes, 777 KB raw → 107 KB gzipped. `grammers/` → `grammars/` and `Fetch-Grammers.ps1` → `fetch-grammars.ps1` (the script's own default `-ManifestPath` had always pointed at the correctly-spelled path, so it could never have run). Two fixes to the script: `Invoke-WebRequest -UseBasicParsing` returns `Content` as a string on PowerShell 5.1 and bytes on 7; and VS Code ships its themes as JSONC, which `ConvertFrom-Json` rejects — added a string-aware comment stripper.
+- **Soak test first, per ROADMAP.** `nib --soak <dir> <passes>` against the *published* single-file build: 2,295,460 lines / 18,515,540 tokens over 20 passes, 40 separate process launches, 0 errors, flat 87 MB. The Onigwrap + `PublishSingleFile` heap report (dotnet/runtime#65443) does not reproduce. Kill criterion not triggered; the hand-rolled-tokenizer fallback stays unbuilt.
+- Three TextMateSharp incompatibilities found, all of which fail silently or misleadingly (written up in CLAUDE.md):
+  1. `GrammarReader` does not survive a non-seekable stream — a `StreamReader` over a live `GZipStream` loses characters on the larger grammars. Python and JavaScript came back null; XML and YAML failed much later as a cast error inside rule compilation. Fix: inflate to a `MemoryStream` first.
+  2. Upstream grammars are malformed in ways VS Code tolerates: all three YAML variants put a `"comment"` string inside a `captures` map, and XML's JSP comment rule has `"end"`/`"name"` nested inside `captures` plus a sibling `begin` with no `end`. `RawGrammarFixup` lifts the misplaced keys out and rewrites an end-less `begin` to `match`. Markdown was collateral — compiling it resolves its fenced-code include of `text.xml`. Fixed at load time, so the vendored `.gz` stay byte-identical to upstream.
+  3. `StateStack.Equals` is not structural. It hides because a line that leaves the state untouched gets the *same* object back, so reference equality carries JSON/INI/TOML/PowerShell/Python. YAML rebuilds its stack per line and so never converged: every keystroke re-tokenized the whole visible window. `StateEquivalence` compares the chain properly. YAML went from 37 lines per edit to 2.
+- `Model/TextBuffer` gained `LinesChanged(row, removed, inserted)` — on the buffer, not the command layer, because undo/redo mutate it directly. The highlighter splices its `List<LineState>` to match rather than discarding it; keeping the rows below an edit is exactly what makes convergence detectable.
+- Deviation from plan: **no worker thread.** Visible window is synchronous; the rest fills in on the loop thread under a 1.5 ms per-frame budget. A worker would read `TextBuffer` while the loop edits it — marshalling results back fixes the output side of that race, not the input side. `Pump()` kept as a no-op on the interface.
+- `Ui/EditorView.DrawLine` walks spans alongside characters with one cursor (spans are ordered and non-overlapping), so tab expansion and horizontal scroll are untouched; selection background still wins over token colour, and the hardcoded selection blue now defers to the theme's `editor.selectionBackground` where one exists (Dark+ and Light+ declare none — VS Code supplies those from built-ins we don't vendor).
+- `--theme <id>` at startup, Alt+T to cycle. Alt rather than Ctrl: every Ctrl chord is spoken for by the nano/CUA bindings.
+- Measurements: edit on a 20k-line YAML = 1.7 ms (repair itself is 2 lines); open + colour first screen of 20k lines = 23–44 ms; jump to EOF of an untokenized 20k-line file = 0.4–0.9 s once, then cached (the sequential walk is the tradeoff for not having provisional state); published exe 1.33 MB (was 324 KB), budget 10 MB.
+- Startup is **135 ms**, against 138 ms for a pre-phase-5 build measured in a worktree on the same machine. The ROADMAP's sub-100 ms criterion is not met and never was — it is .NET runtime start, not highlighting. Sub-100 ms needs NativeAOT, which Onigwrap precludes.
+- Tests: 158 green (was 88). New: `GrammarStoreTests` (every grammar loads *and tokenizes* — compilation is lazy, so loading proves nothing), `ThemeMapTests`, `LanguageDetectorTests`, `HighlightCacheTests` (convergence and cache alignment), `HighlightFixtureTests` (14 committed sample files under `tests/fixtures/highlight/`), `HighlightBudgetTests`. Clean build, warnings-as-errors.
+- Next: interactive hardware acceptance for phases 3–5 (see Open Todos), then phase 6.
 
 ### 2026-07-27 (phase 4)
 - Selection / clipboard / undo landed. `Model/` stays console-free: `TextPosition` (ordered row/col), `Selection` (anchor + live-cursor head, per-row spans for the view), `Model/Undo/Edit` + `Model/Undo/UndoStack`. `TextBuffer` gained the three ranged verbs everything reduces to — `GetRange` / `DeleteRange` / `InsertMultiline` — plus a static `Advance`. `InsertMultiline` preserves the endings embedded in its text (that is what makes undo byte-exact); paste stays consistent by normalizing the clipboard to the buffer's dominant ending first.

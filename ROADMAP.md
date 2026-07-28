@@ -100,7 +100,7 @@ Write it first, in phase 3, before any editing operation exists.
 
 ---
 
-## Phase 4 — Selection, clipboard, undo ← current
+## Phase 4 — Selection, clipboard, undo
 
 **Goal:** the operations that make editing feel normal rather than punishing.
 
@@ -144,36 +144,61 @@ it on top of a stable editor means a problem here is contained.
 
 - **Before anything else:** soak-test TextMateSharp in a published single-file
   build. Open and close hundreds of files. Confirm the Onigwrap +
-  `PublishSingleFile` heap issue is dead.
+  `PublishSingleFile` heap issue is dead. → `nib --soak`, and it is.
 - `IHighlighter` interface, then `TextMateHighlighter` behind it
 - `GrammarStore` — gzipped embedded resources, custom `IRegistryOptions`, lazy
   per-scope decompression
 - `ThemeMap` — scope selector → 24-bit color, with a no-color fallback
-- `TokenizeScheduler` — sync for the visible window, background for the rest,
-  results marshalled back on the render tick
-- Carry-state caching with convergence-based invalidation
+- ~~`TokenizeScheduler` — sync for the visible window, background for the rest,
+  results marshalled back on the render tick~~ → **no worker thread.** The visible
+  window is synchronous as planned, but the rest fills in on the loop thread under
+  a 1.5 ms per-frame budget. A worker would have to read `TextBuffer` while the
+  loop edits it, and `Model/` is not thread-safe; marshalling results back solves
+  the output side of that race, not the input side. `IHighlighter.Pump()` survives
+  as a no-op so a future engine can background its work without the loop changing.
+- Carry-state caching with convergence-based invalidation — plus `StateEquivalence`,
+  because `StateStack.Equals` is not structural and silently defeats the whole
+  scheme for YAML
+- `RawGrammarFixup` — unplanned; repairs malformations in the XML and YAML grammars
+  that VS Code tolerates and TextMateSharp does not
 - Language detection: extension → filename → shebang → manual override
 
 **Acceptance**
 
-- [ ] All 13 languages highlight correctly on a representative sample file each
-- [ ] YAML highlights (proves the six-file dispatcher chain resolved)
-- [ ] TOML highlights (proves the taplo grammar loaded)
-- [ ] Editing line 3 of a 20k-line file re-tokenizes in under 5 ms
-- [ ] A 2 MB minified `.js` file opens without hanging — timeout does its job
-- [ ] Theme switching applies without restart
-- [ ] Unknown file types open uncolored, no error
-- [ ] Startup still under 100 ms to first paint
-- [ ] Published `nib.exe` still under 10 MB
+- [x] All 14 languages highlight correctly on a representative sample file each
+      (`HighlightFixtureTests` over `tests/fixtures/highlight/`; 14, not 13 — the
+      other five grammars are YAML dependencies and are never selected directly)
+- [x] YAML highlights (proves the six-file dispatcher chain resolved —
+      `GrammarStoreTests` asserts on `meta.stream.yaml`, defined only in the
+      delegated grammar)
+- [x] TOML highlights (proves the taplo grammar loaded)
+- [x] Editing line 3 of a 20k-line file re-tokenizes in under 5 ms — 1.7 ms
+      measured, of which the repair itself is 2 lines (`HighlightBudgetTests`)
+- [x] A 2 MB minified `.js` file opens without hanging — timeout does its job
+      (`HighlightCacheTests`; a 128k-char single line returns in well under a second)
+- [x] Theme switching applies without restart (Alt+T; `--theme <id>` at startup)
+- [x] Unknown file types open uncolored, no error (`NullHighlighter`)
+- [ ] ~~Startup still under 100 ms to first paint~~ — **not met, and not phase 5's
+      doing.** 135 ms, against 138 ms for a pre-phase-5 build on the same machine.
+      That is .NET runtime startup; grammars load lazily after the console is up.
+      Getting under 100 ms needs NativeAOT, which Onigwrap currently precludes.
+- [x] Published `nib.exe` still under 10 MB — 1.33 MB (was 324 KB)
 
-**Risk: highest in the project.** Native interop, single-file extraction, and a
-regex engine that can pathologically backtrack. Mitigations: soak test first,
-`IHighlighter` keeps the engine swappable, and a hand-rolled tokenizer for the
-five config formats is a viable fallback that still covers the common case.
+Still open: the interactive run. Colour on a real console in both Windows Terminal
+and legacy `conhost`, Alt+T cycling all five themes with no artifacts, and a large
+YAML file scrolling without visible lag. See `docs/PROGRESS.md`.
+
+**Risk: was highest in the project; discharged.** The soak test ran first, as
+planned: 2.3 M lines and 18.5 M tokens over a published single-file build with zero
+errors, so the Onigwrap heap report does not reproduce and the hand-rolled-tokenizer
+fallback is not needed. The real cost was elsewhere — three TextMateSharp
+incompatibilities (non-seekable streams, malformed upstream grammars, and a
+non-structural state comparison that quietly defeated incremental re-tokenization
+for YAML specifically). All three are written up in CLAUDE.md and covered by tests.
 
 ---
 
-## Phase 6 — Polish
+## Phase 6 — Polish ← current
 
 **Goal:** the things whose absence you'd notice on day three.
 
@@ -199,7 +224,7 @@ five config formats is a viable fallback that still covers the common case.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Onigwrap + single-file instability | Low | High | Soak test at the start of phase 5; `IHighlighter` allows swapping engines |
+| Onigwrap + single-file instability | ~~Low~~ none observed | High | Soak tested 2026-07-27, 2.3 M lines, clean; re-run `nib --soak` after any TextMateSharp or .NET upgrade |
 | Encoding/line-ending corruption | Medium | **Severe** | Byte-for-byte round-trip tests written before any editing code |
 | Scope creep toward an IDE | High | Medium | Non-goals list in the PRD; measure every request against "would nano have this?" |
 | Legacy conhost VT gaps | Medium | Low | Detect failure to set VT processing; run uncolored |
