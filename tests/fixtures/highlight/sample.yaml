@@ -1,0 +1,11 @@
+# nib highlight fixture
+services:
+  web:
+    image: "nginx:latest"
+    ports:
+      - 8080:80
+    environment:
+      DEBUG: false
+    command: |
+      echo hello
+      echo world

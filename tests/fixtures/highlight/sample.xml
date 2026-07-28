@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- nib highlight fixture -->
+<configuration>
+  <appSettings>
+    <add key="Timeout" value="30" />
+  </appSettings>
+</configuration>

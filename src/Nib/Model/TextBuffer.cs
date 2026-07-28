@@ -24,6 +24,23 @@ public sealed class TextBuffer
 
     public bool IsModified { get; private set; }
 
+    /// <summary>
+    /// Raised after every mutation: rows <c>[row, row + removed)</c> were replaced by
+    /// <c>inserted</c> rows. A plain in-line edit is (row, 1, 1); splitting a line is
+    /// (row, 1, 2); joining two is (row, 2, 1).
+    ///
+    /// The syntax highlighter's per-line cache subscribes to this so it can splice
+    /// itself in step with the buffer rather than being thrown away — keeping the
+    /// rows below an edit means their cached carry state is still there to compare
+    /// against, which is what lets re-tokenization stop as soon as it converges.
+    ///
+    /// It lives on the buffer rather than on the command layer because undo and redo
+    /// mutate the buffer directly, bypassing <c>EditorCommands</c>. This is an
+    /// <c>Action</c>, not console-aware anything — <c>Model/</c> stays free of
+    /// <c>Terminal/</c>.
+    /// </summary>
+    public event Action<int, int, int>? LinesChanged;
+
     public TextBuffer(List<Line> lines, DocumentEncoding encoding, string? path)
     {
         // A buffer always has at least one line so the cursor and renderer have
@@ -70,7 +87,7 @@ public sealed class TextBuffer
         if (text.Length == 0) return;
         Line line = _lines[row];
         line.Text = line.Text.Insert(col, text);
-        IsModified = true;
+        Changed(row, 1, 1);
     }
 
     /// <summary>
@@ -88,7 +105,7 @@ public sealed class TextBuffer
         line.Text = head;
         line.Ending = DefaultEnding;
         _lines.Insert(row + 1, tailLine);
-        IsModified = true;
+        Changed(row, 1, 2);
     }
 
     /// <summary>
@@ -102,7 +119,7 @@ public sealed class TextBuffer
         {
             Line line = _lines[row];
             line.Text = line.Text.Remove(col - 1, 1);
-            IsModified = true;
+            Changed(row, 1, 1);
         }
         else if (row > 0)
         {
@@ -121,7 +138,7 @@ public sealed class TextBuffer
         if (col < line.Text.Length)
         {
             line.Text = line.Text.Remove(col, 1);
-            IsModified = true;
+            Changed(row, 1, 1);
         }
         else if (row < _lines.Count - 1)
         {
@@ -171,7 +188,7 @@ public sealed class TextBuffer
             {
                 Line only = _lines[start.Row];
                 only.Text = only.Text.Remove(start.Col, end.Col - start.Col);
-                IsModified = true;
+                Changed(start.Row, 1, 1);
             }
             return;
         }
@@ -181,7 +198,7 @@ public sealed class TextBuffer
         first.Text = first.Text[..start.Col] + last.Text[end.Col..];
         first.Ending = last.Ending; // the lower line's terminator ends the merged line
         _lines.RemoveRange(start.Row + 1, end.Row - start.Row);
-        IsModified = true;
+        Changed(start.Row, end.Row - start.Row + 1, 1);
     }
 
     /// <summary>
@@ -201,7 +218,7 @@ public sealed class TextBuffer
         {
             // No embedded newline: a plain in-line insert.
             line.Text = line.Text.Insert(at.Col, segments[0]);
-            IsModified = true;
+            Changed(at.Row, 1, 1);
             return new TextPosition(at.Row, at.Col + segments[0].Length);
         }
 
@@ -225,7 +242,7 @@ public sealed class TextBuffer
         string lastSeg = segments[^1];
         row++;
         _lines.Insert(row, new Line(lastSeg + tail, tailEnding));
-        IsModified = true;
+        Changed(at.Row, 1, breaks.Count + 1);
         return new TextPosition(row, lastSeg.Length);
     }
 
@@ -290,7 +307,14 @@ public sealed class TextBuffer
         upper.Text += lower.Text;
         upper.Ending = lower.Ending;
         _lines.RemoveAt(row + 1);
+        Changed(row, 2, 1);
+    }
+
+    // The one place a mutation is recorded. See LinesChanged for the row arithmetic.
+    private void Changed(int row, int removed, int inserted)
+    {
         IsModified = true;
+        LinesChanged?.Invoke(row, removed, inserted);
     }
 
     /// <summary>Clear the modified flag after a successful save.</summary>

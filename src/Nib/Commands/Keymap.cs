@@ -13,6 +13,7 @@ public enum EditorAction
     Save,
     Quit,
     Help,
+    CycleTheme,
 }
 
 /// <summary>
@@ -31,7 +32,10 @@ public static class Keymap
         Model.Cursor cur = cmd.Cursor;
         bool ext = ev.Shift; // Shift held → extend the selection through the move
 
-        if (ev.Alt) return EditorAction.None; // no Alt chords yet
+        // Alt+T cycles the theme. Alt, not Ctrl: every Ctrl chord is already spoken
+        // for by the nano and CUA bindings, and taking one for a cosmetic toggle
+        // would cost muscle memory that matters more.
+        if (ev.Alt) return ev.Key == ConsoleKey.T ? EditorAction.CycleTheme : EditorAction.None;
 
         if (ev.Ctrl)
         {
