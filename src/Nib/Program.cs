@@ -1,3 +1,4 @@
+using System.Reflection;
 using Nib.Commands;
 using Nib.Highlight;
 using Nib.Model;
@@ -31,6 +32,7 @@ internal static class Program
                 case "--soak": soak = true; break;
                 case "--theme": theme = i + 1 < args.Length ? args[++i] : null; break;
                 case "--help" or "-h": PrintHelp(); return 0;
+                case "--version" or "-v": PrintVersion(); return 0;
                 default:
                     if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
                     break;
@@ -97,12 +99,38 @@ internal static class Program
         Console.WriteLine("  --soak [dir] [passes]");
         Console.WriteLine("                 tokenizer soak test; not part of the editor");
         Console.WriteLine("  -h, --help");
+        Console.WriteLine("  -v, --version");
         Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
         Console.WriteLine("      Shift+move selects; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
         Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help;");
         Console.WriteLine("      Alt+T cycle theme.");
+    }
+
+    private static void PrintVersion()
+    {
+        Console.WriteLine($"nib {Version}");
+    }
+
+    /// <summary>
+    /// The assembly's informational version, which is what &lt;Version&gt; in the
+    /// csproj (and <c>-p:Version=</c> on the release publish) actually stamps.
+    /// AssemblyVersion is truncated to four numeric parts, so it cannot carry a
+    /// prerelease suffix; the informational one can, and the SDK appends
+    /// <c>+&lt;commit-sha&gt;</c> to it when SourceLink is active — trim that, the
+    /// zip's VERSION.txt records the commit.
+    /// </summary>
+    internal static string Version
+    {
+        get
+        {
+            string? v = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (string.IsNullOrEmpty(v)) return "0.0.0";
+            int plus = v.IndexOf('+', StringComparison.Ordinal);
+            return plus < 0 ? v : v[..plus];
+        }
     }
 }
 

@@ -9,6 +9,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
 
+    <!-- One source of truth for the version flag, the release zip name and the
+         VERSION.txt inside it. tools/release.ps1 overrides it on the publish
+         command line, so the value here is only the dev-build default. -->
+    <Version>0.6.0</Version>
+    <Product>Nib</Product>
+    <Company>Jeremy Champion</Company>
+    <Description>A nano-style console text editor for Windows.</Description>
+
     <!-- TerminalWriter.Flush pins the frame buffer and hands a char* to WriteConsoleW. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
@@ -31,6 +39,10 @@
 
   <PropertyGroup>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Framework-dependent here on purpose: SelfContained=true would make every
+         `dotnet build` copy the whole runtime into bin/, which wrecks the fast dev
+         loop. Releases are self-contained — tools/release.ps1 sets it on the
+         publish command line instead. -->
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <!-- Required once TextMateSharp lands in phase 5: its Oniguruma wrapper is a
