@@ -209,7 +209,10 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 - Mouse: click to position, drag to select, wheel to scroll
 - Help screen
 - `%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off
-- `nib --version`, `--help`, `+LINE file` to open at a line
+- ~~`nib --version`, `--help`~~ — done; `+LINE file` to open at a line
+- Distribution: `tools/release.ps1` builds a self-contained zip with an installer.
+  Done ahead of the rest of phase 6, since nothing else here is testable by anyone
+  who cannot install it. See BUILD.md
 
 **Acceptance**
 
@@ -228,7 +231,7 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 | Encoding/line-ending corruption | Medium | **Severe** | Byte-for-byte round-trip tests written before any editing code |
 | Scope creep toward an IDE | High | Medium | Non-goals list in the PRD; measure every request against "would nano have this?" |
 | Legacy conhost VT gaps | Medium | Low | Detect failure to set VT processing; run uncolored |
-| Binary size drifts past 10 MB | Low | Low | Grammars are vendored and curated, not a NuGet package |
+| Binary size drifts past 10 MB | Low | Low | Applies to the framework-dependent build (1.33 MB); grammars are vendored and curated, not a NuGet package. The **shipped** zip is self-contained and is ~80 MB by construction — that is the runtime, not drift, and the threshold does not apply to it |
 
 ## Kill criteria
 

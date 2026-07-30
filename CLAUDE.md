@@ -99,6 +99,62 @@ Refresh vendored grammars (not part of the build; the `.gz` files are committed)
 ./tools/fetch-grammars.ps1 -Force
 ```
 
+**Releasing.** `./tools/release.ps1 -Version x.y.z` → `dist/nib-x.y.z-win-x64.zip`
+(exe + `install.ps1` + docs + SHA256). Details in BUILD.md. Two things about it are
+load-bearing:
+
+- The release publish is **self-contained**; the csproj is not. `SelfContained=true`
+  in the csproj would make every `dotnet build` copy the runtime into `bin/`, so
+  `release.ps1` sets it on the publish command line instead. ~80 MB shipped vs
+  ~1.3 MB for a dev build — that is the runtime, and it is what makes the zip work
+  on a machine with no .NET.
+- **Do not add `PublishTrimmed`.** TextMateSharp resolves grammar rule types
+  reflectively; the trimmer strips them and it surfaces as a null grammar at
+  runtime, not as a build error. `EnableCompressionInSingleFile` is also left off —
+  it would halve the zip but decompresses on every launch, and startup is already
+  135 ms against a 100 ms goal.
+
+### PowerShell landmines
+
+Both of these were found by running the thing, not by reading it. Same rule as
+`Terminal/`: written down so they cost that time once.
+
+**Editing user PATH corrupts it from both sides if you use the convenient API.**
+`install.ps1` reads from `HKCU:\Environment` with `DoNotExpandEnvironmentNames` and
+writes back through `RegistryKey.SetValue` with the value kind preserved.
+
+- Read side: `[Environment]::GetEnvironmentVariable('Path','User')` *expands*
+  `%USERPROFILE%`-style entries. Write that string back and you have silently
+  replaced a variable someone wrote deliberately with a literal path.
+- Write side: `[Environment]::SetEnvironmentVariable` stores a plain `REG_SZ`. A
+  PATH that was `REG_EXPAND_SZ` comes back downgraded, and every surviving `%VAR%`
+  in it stops expanding — the same corruption arriving from the other direction.
+  This one is easy to miss because the *text* of PATH still looks perfect; only
+  `GetValueKind` shows it.
+
+Avoiding `SetEnvironmentVariable` means no `WM_SETTINGCHANGE` broadcast, so the
+script sends one itself via `SendMessageTimeout` (not `SendMessage` — a hung
+top-level window would block the installer indefinitely).
+
+Jeremy's PATH really does end in `%USERPROFILE%\.dotnet\tools`, so this is not
+hypothetical. Verify a change to that code by checking `GetValueKind('Path')` is
+still `ExpandString` and the raw value is byte-identical after install-then-
+uninstall.
+
+**Keep `tools/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
+5.1 decodes them as CP-1252, not UTF-8. A UTF-8 em dash is three bytes and the last
+lands on an ASCII `"` in that code page — which terminates a string literal
+mid-line and swallows everything after it. It does **not** raise a parse error: one
+function absorbs the next and callers quietly run the wrong body. An em dash inside
+a `Write-Host` string made `Add-ToUserPath` execute `Remove-FromUserPath`, and the
+only visible symptom was a `-WhatIf` line with the wrong verb.
+
+`ToolScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
+regression cannot reach a zip. When a script misbehaves in a way that makes no
+sense, check the AST first — `Parser::ParseFile` and print each function's
+`Extent.StartLineNumber`/`EndLineNumber`. A function spanning past its closing brace
+names the bug immediately.
+
 ---
 
 ## Win32 landmines
