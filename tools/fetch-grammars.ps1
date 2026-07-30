@@ -15,7 +15,7 @@
     solve once, here.
 
     Re-run this when you want to pick up upstream grammar fixes. It is not part
-    of the build — the .json.gz files are committed.
+    of the build - the .json.gz files are committed.
 
 .EXAMPLE
     ./tools/fetch-grammars.ps1
