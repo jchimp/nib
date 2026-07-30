@@ -15,7 +15,7 @@
     solve once, here.
 
     Re-run this when you want to pick up upstream grammar fixes. It is not part
-    of the build — the .json.gz files are committed.
+    of the build - the .json.gz files are committed.
 
 .EXAMPLE
     ./tools/fetch-grammars.ps1
@@ -50,7 +50,60 @@ function Get-RemoteJson {
     Write-Verbose "GET $Uri"
     $resp = Invoke-WebRequest -Uri $Uri -UseBasicParsing
     if ($resp.StatusCode -ne 200) { throw "HTTP $($resp.StatusCode) for $Uri" }
-    return [Text.Encoding]::UTF8.GetString($resp.Content)
+
+    # Windows PowerShell 5.1 hands back Content already decoded to a string;
+    # PowerShell 7 gives a byte[] for anything it doesn't classify as text.
+    # Both happen depending on which pwsh the caller has, so handle both.
+    if ($resp.Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($resp.Content) }
+    return [string]$resp.Content
+}
+
+function ConvertFrom-Jsonc {
+    <#
+        VS Code ships its themes as JSONC: // comments, /* */ blocks, and the
+        occasional trailing comma. ConvertFrom-Json rejects all three. Strip them
+        while tracking string context, so a "//" inside a colour value or a URL
+        in a string survives.
+    #>
+    param([Parameter(Mandatory)][string] $Text)
+
+    $sb       = New-Object Text.StringBuilder
+    $inString = $false
+    $escaped  = $false
+    $i        = 0
+
+    while ($i -lt $Text.Length) {
+        $c = $Text[$i]
+
+        if ($inString) {
+            [void]$sb.Append($c)
+            if     ($escaped)    { $escaped = $false }
+            elseif ($c -eq '\')  { $escaped = $true }
+            elseif ($c -eq '"')  { $inString = $false }
+            $i++
+            continue
+        }
+
+        if ($c -eq '"') { $inString = $true; [void]$sb.Append($c); $i++; continue }
+
+        if ($c -eq '/' -and ($i + 1) -lt $Text.Length) {
+            if ($Text[$i + 1] -eq '/') {
+                while ($i -lt $Text.Length -and $Text[$i] -ne "`n") { $i++ }
+                continue
+            }
+            if ($Text[$i + 1] -eq '*') {
+                $i += 2
+                while (($i + 1) -lt $Text.Length -and -not ($Text[$i] -eq '*' -and $Text[$i + 1] -eq '/')) { $i++ }
+                $i += 2
+                continue
+            }
+        }
+
+        [void]$sb.Append($c)
+        $i++
+    }
+
+    return ([Regex]::Replace($sb.ToString(), ',(\s*[}\]])', '$1') | ConvertFrom-Json)
 }
 
 function Merge-ThemeChain {
@@ -67,7 +120,7 @@ function Merge-ThemeChain {
     $type        = 'dark'
 
     foreach ($url in $Urls) {
-        $obj = Get-RemoteJson -Uri $url | ConvertFrom-Json
+        $obj = ConvertFrom-Jsonc -Text (Get-RemoteJson -Uri $url)
         if ($obj.PSObject.Properties.Name -contains 'name')  { $name = $obj.name }
         if ($obj.PSObject.Properties.Name -contains 'type')  { $type = $obj.type }
         if ($obj.PSObject.Properties.Name -contains 'colors' -and $obj.colors) {
@@ -115,7 +168,7 @@ foreach ($g in $manifest.grammars) {
 
     try {
         $text = Get-RemoteJson -Uri $g.url
-        $obj  = $text | ConvertFrom-Json
+        $obj  = ConvertFrom-Jsonc -Text $text
 
         if ($obj.scopeName -ne $g.scopeName) {
             throw "scopeName drift: manifest says '$($g.scopeName)', upstream says '$($obj.scopeName)'"

@@ -38,6 +38,28 @@ public sealed class EditorCommands
 
     private TextPosition Caret => new(Cursor.Row, Cursor.Col);
 
+    /// <summary>
+    /// The selection as buffer coordinates, clamped to what the buffer actually has.
+    ///
+    /// <see cref="Selection"/> stores a raw anchor position and the buffer can shrink
+    /// underneath it, so a stale anchor can name a row that no longer exists. Every
+    /// use of the selection as an index goes through here rather than through
+    /// <see cref="Selection.Range"/> directly — the clear in <see cref="ApplyReplace"/>
+    /// is what should prevent a stale anchor, and this is what stops it being a crash
+    /// if one ever gets through again.
+    /// </summary>
+    private (TextPosition Start, TextPosition End) SelectionRange()
+    {
+        (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+        return (Clamp(start), Clamp(end));
+    }
+
+    private TextPosition Clamp(TextPosition position)
+    {
+        int row = Math.Clamp(position.Row, 0, _buffer.LineCount - 1);
+        return new TextPosition(row, Math.Clamp(position.Col, 0, _buffer.LineLength(row)));
+    }
+
     // ---- text entry ---------------------------------------------------------
 
     public void InsertChar(char ch) => TypeText(ch.ToString());
@@ -49,7 +71,7 @@ public sealed class EditorCommands
     {
         if (_selection.IsActive(Cursor))
         {
-            (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+            (TextPosition start, TextPosition end) = SelectionRange();
             _selection.Clear();
             ApplyReplace(start, end, text, coalesce: false); // typing over a selection is one step
         }
@@ -64,7 +86,7 @@ public sealed class EditorCommands
         string newline = _buffer.DefaultEnding.ToChars();
         if (_selection.IsActive(Cursor))
         {
-            (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+            (TextPosition start, TextPosition end) = SelectionRange();
             _selection.Clear();
             ApplyReplace(start, end, newline, coalesce: false);
         }
@@ -127,14 +149,14 @@ public sealed class EditorCommands
     public void Copy()
     {
         if (!_selection.IsActive(Cursor)) return;
-        (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+        (TextPosition start, TextPosition end) = SelectionRange();
         _clipboard.SetText(ToCrlf(_buffer.GetRange(start, end)));
     }
 
     public void Cut()
     {
         if (!_selection.IsActive(Cursor)) return;
-        (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+        (TextPosition start, TextPosition end) = SelectionRange();
         _clipboard.SetText(ToCrlf(_buffer.GetRange(start, end)));
         _selection.Clear();
         ApplyReplace(start, end, "", coalesce: false);
@@ -148,7 +170,7 @@ public sealed class EditorCommands
 
         if (_selection.IsActive(Cursor))
         {
-            (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+            (TextPosition start, TextPosition end) = SelectionRange();
             _selection.Clear();
             ApplyReplace(start, end, text, coalesce: false);
         }
@@ -161,7 +183,7 @@ public sealed class EditorCommands
     public void DeleteSelection()
     {
         if (!_selection.IsActive(Cursor)) return;
-        (TextPosition start, TextPosition end) = _selection.Range(Cursor);
+        (TextPosition start, TextPosition end) = SelectionRange();
         _selection.Clear();
         ApplyReplace(start, end, "", coalesce: false);
     }
@@ -202,6 +224,16 @@ public sealed class EditorCommands
     // undo step; the stack still refuses to merge anything that spans a line.
     private void ApplyReplace(TextPosition start, TextPosition end, string inserted, bool coalesce)
     {
+        // No selection survives an edit, so drop the anchor here rather than relying
+        // on each caller. The ones that consume a selection already clear it; the
+        // ones that don't used to leave a *collapsed* anchor behind — Shift+Right
+        // then Shift+Left sets an anchor that IsActive reports as inactive, so
+        // Backspace and Delete took the no-selection path and left it in place.
+        // Join two lines from there and the anchor names a row the buffer no longer
+        // has; re-extend with Shift and the next Copy indexes off the end and takes
+        // the editor down with the user's unsaved buffer.
+        _selection.Clear();
+
         TextPosition caretBefore = Caret;
         string removed = _buffer.GetRange(start, end);
         if (end != start) _buffer.DeleteRange(start, end);

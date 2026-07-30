@@ -9,6 +9,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
 
+    <!-- One source of truth for the version flag, the release zip name and the
+         VERSION.txt inside it. tools/release.ps1 overrides it on the publish
+         command line, so the value here is only the dev-build default. -->
+    <Version>0.6.0</Version>
+    <Product>Nib</Product>
+    <Company>Jeremy Champion</Company>
+    <Description>A nano-style console text editor for Windows.</Description>
+
     <!-- TerminalWriter.Flush pins the frame buffer and hands a char* to WriteConsoleW. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
@@ -31,6 +39,10 @@
 
   <PropertyGroup>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Framework-dependent here on purpose: SelfContained=true would make every
+         `dotnet build` copy the whole runtime into bin/, which wrecks the fast dev
+         loop. Releases are self-contained — tools/release.ps1 sets it on the
+         publish command line instead. -->
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <!-- Required once TextMateSharp lands in phase 5: its Oniguruma wrapper is a
@@ -41,12 +53,20 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- Phase 5 will add:
-       <ItemGroup>
-         <PackageReference Include="TextMateSharp" Version="2.*" />
-         <EmbeddedResource Include="Resources\Grammars\*.json.gz" />
-         <EmbeddedResource Include="Resources\Themes\*.json.gz" />
-       </ItemGroup>
-       Note we do NOT reference TextMateSharp.Grammars — see CLAUDE.md. -->
+  <!-- Engine only. We deliberately do NOT reference TextMateSharp.Grammars: it
+       ships 40+ languages and 20 themes we would never open and is the single
+       biggest contributor to binary size. See CLAUDE.md. -->
+  <ItemGroup>
+    <PackageReference Include="TextMateSharp" Version="1.0.66" />
+  </ItemGroup>
+
+  <!-- Vendored by tools/fetch-grammars.ps1 and committed; not built from source.
+       The manifest rides along as a resource so language detection reads the same
+       extension/filename/shebang table the vendoring script does. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Grammars\*.json.gz" />
+    <EmbeddedResource Include="Resources\Themes\*.json.gz" />
+    <EmbeddedResource Include="..\..\grammars\manifest.json" LogicalName="Nib.Resources.manifest.json" />
+  </ItemGroup>
 
 </Project>

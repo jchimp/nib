@@ -43,8 +43,9 @@ src/Nib/
   Terminal/      NativeMethods, ConsoleHost, TerminalWriter, InputReader,
                  InputEvents, Clipboard, Screen (phase 2)
   Model/         TextBuffer, Line, Cursor, Selection, Undo/, FileIo   (phase 3)
-  Highlight/     TextMateHighlighter, GrammarStore, ThemeMap,
-                 TokenizeScheduler                                    (phase 5)
+  Highlight/     IHighlighter, TextMateHighlighter, GrammarStore,
+                 GrammarManifest, ThemeMap, LanguageDetector,
+                 RawGrammarFixup, StateEquivalence, Soak            (phase 5)
   Ui/            EditorView, StatusBar, HelpBar, Prompt               (phase 3+)
   Commands/      Keymap, Commands                                     (phase 3+)
   Resources/     Grammars/*.json.gz, Themes/*.json.gz  (generated, committed)
@@ -98,6 +99,62 @@ Refresh vendored grammars (not part of the build; the `.gz` files are committed)
 ./tools/fetch-grammars.ps1 -Force
 ```
 
+**Releasing.** `./tools/release.ps1 -Version x.y.z` → `dist/nib-x.y.z-win-x64.zip`
+(exe + `install.ps1` + docs + SHA256). Details in BUILD.md. Two things about it are
+load-bearing:
+
+- The release publish is **self-contained**; the csproj is not. `SelfContained=true`
+  in the csproj would make every `dotnet build` copy the runtime into `bin/`, so
+  `release.ps1` sets it on the publish command line instead. ~80 MB shipped vs
+  ~1.3 MB for a dev build — that is the runtime, and it is what makes the zip work
+  on a machine with no .NET.
+- **Do not add `PublishTrimmed`.** TextMateSharp resolves grammar rule types
+  reflectively; the trimmer strips them and it surfaces as a null grammar at
+  runtime, not as a build error. `EnableCompressionInSingleFile` is also left off —
+  it would halve the zip but decompresses on every launch, and startup is already
+  135 ms against a 100 ms goal.
+
+### PowerShell landmines
+
+Both of these were found by running the thing, not by reading it. Same rule as
+`Terminal/`: written down so they cost that time once.
+
+**Editing user PATH corrupts it from both sides if you use the convenient API.**
+`install.ps1` reads from `HKCU:\Environment` with `DoNotExpandEnvironmentNames` and
+writes back through `RegistryKey.SetValue` with the value kind preserved.
+
+- Read side: `[Environment]::GetEnvironmentVariable('Path','User')` *expands*
+  `%USERPROFILE%`-style entries. Write that string back and you have silently
+  replaced a variable someone wrote deliberately with a literal path.
+- Write side: `[Environment]::SetEnvironmentVariable` stores a plain `REG_SZ`. A
+  PATH that was `REG_EXPAND_SZ` comes back downgraded, and every surviving `%VAR%`
+  in it stops expanding — the same corruption arriving from the other direction.
+  This one is easy to miss because the *text* of PATH still looks perfect; only
+  `GetValueKind` shows it.
+
+Avoiding `SetEnvironmentVariable` means no `WM_SETTINGCHANGE` broadcast, so the
+script sends one itself via `SendMessageTimeout` (not `SendMessage` — a hung
+top-level window would block the installer indefinitely).
+
+Jeremy's PATH really does end in `%USERPROFILE%\.dotnet\tools`, so this is not
+hypothetical. Verify a change to that code by checking `GetValueKind('Path')` is
+still `ExpandString` and the raw value is byte-identical after install-then-
+uninstall.
+
+**Keep `tools/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
+5.1 decodes them as CP-1252, not UTF-8. A UTF-8 em dash is three bytes and the last
+lands on an ASCII `"` in that code page — which terminates a string literal
+mid-line and swallows everything after it. It does **not** raise a parse error: one
+function absorbs the next and callers quietly run the wrong body. An em dash inside
+a `Write-Host` string made `Add-ToUserPath` execute `Remove-FromUserPath`, and the
+only visible symptom was a `-WhatIf` line with the wrong verb.
+
+`ToolScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
+regression cannot reach a zip. When a script misbehaves in a way that makes no
+sense, check the AST first — `Parser::ParseFile` and print each function's
+`Extent.StartLineNumber`/`EndLineNumber`. A function spanning past its closing brace
+names the bug immediately.
+
 ---
 
 ## Win32 landmines
@@ -126,6 +183,23 @@ structured stream. Turning both on means parsing escape sequences for no gain.
 **`ENABLE_PROCESSED_INPUT` off is what frees Ctrl+C.** This is the whole
 mechanism. With it cleared, Ctrl+C arrives as an ordinary key event and no
 `CTRL_C_EVENT` is generated at all.
+
+The control handler *also* returns `true` for `CTRL_C_EVENT`, which in normal
+operation is dead code — the event never fires. It is there because the input mode
+was otherwise a single point of failure with nothing behind it: anything that
+restored that flag for a moment would have Windows terminate the editor mid-edit
+with the buffer unsaved. Ctrl+Break is left fatal on purpose, so there is always a
+way out.
+
+**A restore path that works makes a crash look like a clean exit.** `Restore()`
+runs on unhandled exceptions too, so an editor that dies on a bug puts the terminal
+back neatly and simply vanishes — no stack trace on screen, no clue anything went
+wrong. That is what made a real crash in the selection code (a stale anchor
+surviving a line join, then Ctrl+C indexing off the end of the buffer) read as "it
+escaped once". The input loop now catches per keystroke, clamps the cursor and
+reports on the message row, because the buffer is still in memory and the user can
+still save it. Do not "clean that up" into a top-level handler — by the time it
+unwinds that far, the buffer is gone.
 
 **Clearing `ENABLE_QUICK_EDIT_MODE` requires setting `ENABLE_EXTENDED_FLAGS` in
 the same call.** Otherwise the clear is silently ignored and you get no mouse
@@ -175,23 +249,44 @@ colors.
 TextMateSharp's API is line-at-a-time with an explicit carry state:
 
 ```csharp
-ITokenizeLineResult r = grammar.TokenizeLine(line.Text, stateIn, MaxTokenizeTime);
-line.Tokens   = r.Tokens;
-line.StateOut = r.RuleStack;
+ITokenizeLineResult r = grammar.TokenizeLine(text, stateIn, MaxTokenizeTime);
 ```
 
-Cache `StateIn` and `StateOut` per line. On edit, re-tokenize forward from the
-dirty line and **stop as soon as a line's new `StateOut` equals its cached
-`StateOut`** — the rest of the file is unaffected. In practice that's one or two
-lines. This is what makes highlighting free on a 20k-line file.
+Cache the carry state per line. On edit, re-tokenize forward from the dirty line
+and **stop as soon as a line's new carry state matches its cached one** — the rest
+of the file is unaffected. In practice that's one or two lines. This is what makes
+highlighting free on a 20k-line file.
+
+**The cache is a side table in `Highlight/`, not fields on `Model/Line`.** Earlier
+notes showed `line.Tokens` / `line.StateOut`; that would put TextMateSharp types
+inside `Model/`, which exists to be testable with nothing but the BCL.
+`TextMateHighlighter` keeps a `List<LineState>` index-aligned to buffer rows and
+splices it in response to `TextBuffer.LinesChanged` — `(row, removed, inserted)`.
+Splicing rather than discarding is the point: the rows below an edit keep their
+cached state, and comparing against it is what lets the walk stop.
+
+The event lives on `TextBuffer` rather than `EditorCommands` because undo and redo
+mutate the buffer directly and would otherwise bypass it.
 
 **Always pass a real timeout**, not `TimeSpan.MaxValue`. Oniguruma will backtrack
 forever on a minified JavaScript line. VS Code does the same thing for the same
 reason. Start at 50 ms.
 
-**Never tokenize on the render path.** First paint is uncolored. Tokenize the
-visible window synchronously, background the rest, marshal results back through a
-concurrent queue drained on the render tick.
+**Never tokenize on the render path.** First paint is uncolored. `Editor.Draw`
+brings the visible window up to date before `EditorView.Render`; the painter itself
+never runs a regex.
+
+**The rest of the file fills in on the loop thread, not a worker.** Planning notes
+said background thread plus a concurrent queue. Marshalling *results* back is easy;
+the problem is the input side — a worker would read `TextBuffer` while the loop is
+editing it, and `Model/` is not thread-safe. Instead each frame spends a fixed
+1.5 ms budget walking further down the file. Same user-visible behaviour, no race.
+`IHighlighter.Pump()` is kept on the interface (a no-op today) so a future engine
+can background its work without the loop changing.
+
+That budget is the whole per-keystroke cost: repairing an edit converges in a line
+or two, and everything else in the frame goes to lookahead. Raise it and the
+ROADMAP's 5 ms edit budget goes with it.
 
 ### Grammars
 
@@ -213,9 +308,45 @@ Two things about the set that will otherwise waste an afternoon:
   [TextMateSharp loads JSON grammars only](https://github.com/danipen/TextMateSharp),
   so it cannot be used.
 
-Markdown references 61 external scopes for fenced code blocks. The 13 languages
+Markdown references 61 external scopes for fenced code blocks. The 14 languages
 we ship will highlight inside fences; the rest render as plain text. That is
 correct degradation, not a bug.
+
+### TextMateSharp landmines
+
+Three things that each looked like a different bug than they were. All three are
+covered by `GrammarStoreTests`, which loads every grammar *and makes it tokenize* —
+rule compilation is lazy, so loading alone proves nothing.
+
+**Inflate the resource fully before parsing.** `GrammarReader.ReadGrammarSync`
+does not survive a non-seekable stream. Handing it a `StreamReader` over a live
+`GZipStream` silently loses characters on the larger grammars — Python and
+JavaScript came back null, and XML and YAML failed later as a cast error deep in
+rule compilation. `GrammarStore.OpenResource` copies to a `MemoryStream` first.
+
+**Some VS Code grammars are malformed in ways VS Code tolerates.** All three YAML
+variants park a `"comment"` string inside a `captures` map, and XML's JSP comment
+rule has `"end"` and `"name"` nested inside `captures` where they belong beside it,
+plus a sibling rule with a `begin` and no `end`. VS Code only reads numbered
+capture keys and treats an end-less pattern as a match rule; TextMateSharp casts
+every capture value to `IRawRule` and builds a begin/end rule with a null pattern.
+`RawGrammarFixup` repairs both on load. Markdown is collateral damage — compiling
+it resolves its fenced-code include of `text.xml`.
+
+The fix is at load time, not in `fetch-grammars.ps1`, so the vendored `.gz` files
+stay byte-identical to upstream and a re-fetch diff shows real upstream change.
+
+**`StateStack.Equals` is not structural.** It returns false for two stacks
+identical in depth, rule id, end rule and scope path. This hides for most grammars:
+when a line leaves the state untouched TextMateSharp returns the *same* object, so
+reference equality happens to hold and JSON, INI, TOML, PowerShell and Python
+converge after two lines. YAML rebuilds its stack every line, so it never converged
+and every keystroke re-tokenized the entire visible window. `StateEquivalence`
+compares the chain properly — rule identity and scope paths, deliberately not the
+enter/anchor positions, which legitimately differ between equivalent states.
+
+Given YAML is most of what this editor is for, do not "simplify" that back to
+`Equals`.
 
 ### Native dependency
 
@@ -223,13 +354,15 @@ TextMateSharp wraps Oniguruma through the `Onigwrap` native library. Consequence
 
 - `IncludeNativeLibrariesForSelfExtract=true` is required for single-file
   publish. First launch extracts to `%TEMP%\.net\nib\<hash>`.
-- There is a [historical heap-corruption report](https://github.com/dotnet/runtime/issues/65443)
-  combining Onigwrap with `PublishSingleFile`. Old, probably fixed. **Verify at
-  the start of phase 5**, not the end — soak-test a published single-file build
-  opening and closing many files before building anything on top of it.
+- There was a [historical heap-corruption report](https://github.com/dotnet/runtime/issues/65443)
+  combining Onigwrap with `PublishSingleFile`. **It does not reproduce**
+  (2026-07-27): `nib --soak` over a published single-file build did 2.3 M lines and
+  18.5 M tokens across 20 passes, plus 40 process launches, with zero errors and a
+  flat 87 MB working set. Re-run `nib --soak <dir> <passes>` after any TextMateSharp
+  or .NET upgrade rather than assuming it stays fixed.
 
-Put the highlighter behind `IHighlighter` from day one so the engine is
-swappable if that goes badly.
+The highlighter is behind `IHighlighter` anyway, so the engine stays swappable if
+that ever changes.
 
 ---
 
@@ -251,11 +384,19 @@ swappable if that goes badly.
 - **Phase 1 — terminal foundation: verified on hardware (2026-07-26).**
   `Program.cs` is an interactive probe, not an editor. All five checks confirmed
   on a real console; the foundation is cleared for phase 2.
-- Phases 2–6: see `docs/ROADMAP.md`.
+- **Phases 2–5 implemented and unit-tested (158 tests).** Phase 5 landed
+  2026-07-27; the interactive acceptance for phases 3–5 still wants a hardware run.
+- Phase 6: see `ROADMAP.md` (note: at the repo root, not `docs/`).
 
-### Correction carried forward
+### Corrections carried forward
 
 Early planning said to enable `ENABLE_VIRTUAL_TERMINAL_INPUT` on stdin *and* use
 `ReadConsoleInputW`. Those are contradictory. The INPUT_RECORD path is the right
 one, so VT input mode is off. Noted here because the wrong version may appear in
 older notes.
+
+Startup is **~135 ms**, not the sub-100 ms the ROADMAP asks for, and that is .NET
+runtime start: a pre-phase-5 build measures 138 ms on the same machine and phase 5
+measures 135. Highlighting adds nothing to it — grammars load lazily, per scope,
+after the console is up. Getting under 100 ms means NativeAOT, which the Onigwrap
+dependency currently rules out. Don't go looking for it in the highlighter.

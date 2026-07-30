@@ -1,3 +1,4 @@
+using Nib.Highlight;
 using Nib.Model;
 using Nib.Terminal;
 
@@ -18,9 +19,9 @@ public sealed class EditorView
 {
     private static readonly Color BarFg = Color.Rgb(0xFF, 0xFF, 0xFF);
     private static readonly Color BarBg = Color.Rgb(0x00, 0x80, 0x80);
-    // A fixed selection background until phase 5 brings a real theme. Foreground is
-    // left as-is so text stays readable on top of it.
-    private static readonly Color SelectionBg = Color.Rgb(0x26, 0x4F, 0x78);
+    // Used when the active theme declares no editor.selectionBackground, and by the
+    // no-highlighting path. Foreground is left alone so text stays readable on it.
+    private static readonly Color DefaultSelectionBg = Color.Rgb(0x26, 0x4F, 0x78);
 
     private readonly Screen _screen;
     private readonly Viewport _viewport;
@@ -35,6 +36,14 @@ public sealed class EditorView
 
     /// <summary>The live selection to paint, or null when nothing is selected/available.</summary>
     public Selection? Selection { get; set; }
+
+    /// <summary>
+    /// Source of token colour. Defaults to the no-colour implementation, so the view
+    /// works unchanged when no grammar matched the file.
+    /// </summary>
+    public IHighlighter Highlighter { get; set; } = NullHighlighter.Instance;
+
+    private Color SelectionBg => Highlighter.SelectionBackground ?? DefaultSelectionBg;
 
     /// <summary>Screen cell the hardware cursor should sit on, computed by the last <see cref="Render"/>.</summary>
     public int CursorX { get; private set; }
@@ -88,6 +97,11 @@ public sealed class EditorView
     // as spaces across their expanded range; other control chars render as a single
     // placeholder so width-1 column math stays exact. Cells whose *character* index
     // falls inside the selection get the selection background.
+    //
+    // Highlight spans are indexed by the same character index, and arrive ordered
+    // and non-overlapping, so one cursor walks them alongside the text rather than
+    // searching per character. A row with no cached spans — not tokenized yet, or
+    // no grammar — paints in the terminal's own foreground.
     private void DrawLine(int y, int bufferRow, string line)
     {
         int first = _viewport.FirstColumn;
@@ -98,9 +112,22 @@ public sealed class EditorView
         int selStart = 0, selEnd = 0;
         bool hasSel = Selection is { } sel && sel.ContainsRow(bufferRow, _cursor, out selStart, out selEnd);
 
+        IReadOnlyList<StyledSpan>? spans = Highlighter.Spans(bufferRow);
+        int spanIndex = 0;
+
         foreach (char ch in line)
         {
             Color bg = hasSel && charIndex >= selStart && charIndex < selEnd ? SelectionBg : Color.Default;
+
+            while (spans is not null && spanIndex < spans.Count &&
+                   charIndex >= spans[spanIndex].Start + spans[spanIndex].Length)
+            {
+                spanIndex++;
+            }
+
+            Color fg = Color.Default;
+            if (spans is not null && spanIndex < spans.Count && charIndex >= spans[spanIndex].Start)
+                fg = spans[spanIndex].Fg;
 
             if (ch == '\t')
             {
@@ -115,7 +142,7 @@ public sealed class EditorView
             {
                 char glyph = ch < ' ' || ch == '\x7f' ? '?' : ch;
                 int sx = col - first;
-                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, Color.Default, bg);
+                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, fg, bg);
                 col++;
             }
 

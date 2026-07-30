@@ -5,6 +5,10 @@
 publish/
 [Pp]ublish/
 
+# Release artifacts from tools/release.ps1. The zips are ~80 MB self-contained
+# builds; they belong on a release page, not in git history.
+dist/
+
 # .NET
 project.lock.json
 project.fragment.lock.json

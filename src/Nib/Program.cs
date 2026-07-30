@@ -1,4 +1,6 @@
+using System.Reflection;
 using Nib.Commands;
+using Nib.Highlight;
 using Nib.Model;
 using Nib.Terminal;
 using Nib.Ui;
@@ -16,18 +18,33 @@ internal static class Program
     private static int Main(string[] args)
     {
         bool probe = false;
+        bool soak = false;
         string? file = null;
+        string? theme = null;
+        var positional = new List<string>();
 
-        foreach (string a in args)
+        for (int i = 0; i < args.Length; i++)
         {
+            string a = args[i];
             switch (a)
             {
                 case "--probe": probe = true; break;
+                case "--soak": soak = true; break;
+                case "--theme": theme = i + 1 < args.Length ? args[++i] : null; break;
                 case "--help" or "-h": PrintHelp(); return 0;
+                case "--version" or "-v": PrintVersion(); return 0;
                 default:
-                    if (!a.StartsWith('-')) file ??= a;
+                    if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
                     break;
             }
+        }
+
+        // Diagnostic path: no console acquisition, ordinary stdout. See Soak.
+        if (soak)
+        {
+            string? dir = positional.Count > 0 ? positional[0] : null;
+            int passes = positional.Count > 1 && int.TryParse(positional[1], out int p) ? p : 3;
+            return Highlight.Soak.Run(dir, passes);
         }
 
         // Load before touching the console: a bad path should print to a normal
@@ -60,7 +77,7 @@ internal static class Program
         try
         {
             if (probe) Probe.Run(host);
-            else new Editor(host, buffer!).Run();
+            else new Editor(host, buffer!, theme).Run();
             return 0;
         }
         finally
@@ -73,17 +90,47 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine("nib — a console text editor (phase 4: selection, clipboard, undo)");
+        Console.WriteLine("nib — a console text editor (phase 5: syntax highlighting)");
         Console.WriteLine();
         Console.WriteLine("usage: nib [options] [file]");
         Console.WriteLine();
-        Console.WriteLine("  --probe   run the phase-1 terminal probe");
+        Console.WriteLine("  --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast");
+        Console.WriteLine("  --probe        run the phase-1 terminal probe");
+        Console.WriteLine("  --soak [dir] [passes]");
+        Console.WriteLine("                 tokenizer soak test; not part of the editor");
         Console.WriteLine("  -h, --help");
+        Console.WriteLine("  -v, --version");
         Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
         Console.WriteLine("      Shift+move selects; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
-        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help.");
+        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help;");
+        Console.WriteLine("      Alt+T cycle theme.");
+    }
+
+    private static void PrintVersion()
+    {
+        Console.WriteLine($"nib {Version}");
+    }
+
+    /// <summary>
+    /// The assembly's informational version, which is what &lt;Version&gt; in the
+    /// csproj (and <c>-p:Version=</c> on the release publish) actually stamps.
+    /// AssemblyVersion is truncated to four numeric parts, so it cannot carry a
+    /// prerelease suffix; the informational one can, and the SDK appends
+    /// <c>+&lt;commit-sha&gt;</c> to it when SourceLink is active — trim that, the
+    /// zip's VERSION.txt records the commit.
+    /// </summary>
+    internal static string Version
+    {
+        get
+        {
+            string? v = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (string.IsNullOrEmpty(v)) return "0.0.0";
+            int plus = v.IndexOf('+', StringComparison.Ordinal);
+            return plus < 0 ? v : v[..plus];
+        }
     }
 }
 
@@ -103,13 +150,14 @@ internal sealed class Editor
     private readonly EditorView _view;
     private readonly EditorCommands _commands;
     private readonly InputReader _reader;
+    private readonly IHighlighter _highlighter;
     private readonly List<InputEvent> _batch = new(256);
     // Modal prompts (Save-as, quit confirm) read input while the main loop is
     // still enumerating _batch. They must not touch it, or the outer foreach
     // throws "Collection was modified". Separate buffer, never nested modally.
     private readonly List<InputEvent> _modalBatch = new(64);
 
-    public Editor(ConsoleHost host, TextBuffer buffer)
+    public Editor(ConsoleHost host, TextBuffer buffer, string? themeId)
     {
         _host = host;
         _buffer = buffer;
@@ -121,6 +169,11 @@ internal sealed class Editor
         _commands = new EditorCommands(buffer, _cursor, new SystemClipboard());
         _view.Selection = _commands.Selection; // the view paints the live selection
         _reader = new InputReader(host);
+
+        // Falls back to NullHighlighter for an unknown file type or a bad resource:
+        // no colour, no error, no reason for the user to care.
+        _highlighter = TextMateHighlighter.Create(buffer, themeId);
+        _view.Highlighter = _highlighter;
     }
 
     public void Run()
@@ -141,11 +194,26 @@ internal sealed class Editor
                 if (ev.Kind == InputEventKind.Resize) { _screen.Resize(ev.Width, ev.Height); continue; }
                 if (ev.Kind == InputEventKind.Mouse) continue; // phase 6
 
-                switch (Keymap.Handle(ev, _commands, pageRows))
+                // A bug in a command must not cost the user their buffer. Before
+                // this, any exception escaping a keystroke unwound out of Main, and
+                // because ConsoleHost restores the terminal on every exit path it
+                // looked like a clean quit rather than a crash — the editor simply
+                // vanished with everything unsaved. Report it on the message row and
+                // keep going: whatever is broken, the buffer is still in memory and
+                // the user can still save it.
+                try
                 {
-                    case EditorAction.Save: DoSave(); break;
-                    case EditorAction.Quit: if (TryQuit()) return; break;
-                    case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A"; break;
+                    switch (Keymap.Handle(ev, _commands, pageRows))
+                    {
+                        case EditorAction.Save: DoSave(); break;
+                        case EditorAction.Quit: if (TryQuit()) return; break;
+                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Theme: Alt+T"; break;
+                        case EditorAction.CycleTheme: CycleTheme(); break;
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    Recover(ex);
                 }
             }
 
@@ -153,12 +221,36 @@ internal sealed class Editor
         }
     }
 
-    // One frame: clamp/scroll to the caret, paint, then place the hardware cursor
-    // where the view computed it, and flush once.
+    // A command threw. Put the cursor somewhere legal — MoveTo clamps, and a cursor
+    // left pointing outside the buffer would throw again on the very next frame and
+    // turn one bad keystroke into an unusable editor — then say what happened.
+    // Deliberately not caught around Draw(): if painting is what is broken, there is
+    // nowhere left to report it and looping on it would only hang.
+    private void Recover(Exception ex)
+    {
+        _cursor.MoveTo(_cursor.Row, _cursor.Col);
+        _view.Message = $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save";
+    }
+
+    // Alt+T. A theme the grammar-less path can't honour just says so rather than
+    // silently doing nothing.
+    private void CycleTheme()
+    {
+        _view.Message = _highlighter is TextMateHighlighter tm
+            ? $"Theme: {tm.CycleTheme()}"
+            : "No highlighting for this file type";
+    }
+
+    // One frame: clamp/scroll to the caret, bring the visible rows' tokens up to
+    // date, paint, then place the hardware cursor where the view computed it, and
+    // flush once. Tokenizing here rather than inside the painter is deliberate —
+    // the render path itself never runs a regex.
     private void Draw()
     {
         _viewport.ClampVertical(_buffer.LineCount);
         _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _screen.Width);
+        _highlighter.Pump();
+        _highlighter.TokenizeWindow(_viewport.FirstLine, _view.TextRows);
         _view.Render();
         _screen.Render(_host.Out);
         _host.Out.MoveTo(_view.CursorY + 1, _view.CursorX + 1);

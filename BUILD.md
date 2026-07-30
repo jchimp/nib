@@ -31,31 +31,73 @@ Run these from the repo root.
 # Compile (Debug)
 dotnet build src/Nib/Nib.csproj
 
-# Compile and run the phase-1 terminal probe
-dotnet run --project src/Nib/Nib.csproj
+# Compile and run the editor
+dotnet run --project src/Nib/Nib.csproj -- [file]
 ```
 
-The current build is **phase 1**: an interactive probe, not an editor. Running it
-puts the terminal into raw mode and checks Ctrl+C interception, resize events,
-and clipboard round-trip. Press **Ctrl+X** to quit — it restores the console on
-exit. See the header comment in [src/Nib/Program.cs](src/Nib/Program.cs) for what
-each check means.
+`dotnet run` pays 2–4 s of build orchestration on every launch. For anything where
+startup speed matters, build once and run the exe directly:
 
-## Release build (single-file exe)
+```powershell
+dotnet build src/Nib/Nib.csproj
+./src/Nib/bin/Debug/net10.0/win-x64/nib.exe [file]
+```
+
+`nib --probe` runs the phase-1 terminal probe instead of the editor: it puts the
+terminal into raw mode and checks Ctrl+C interception, resize events, and clipboard
+round-trip. `nib --soak [dir] [passes]` runs the tokenizer over a directory tree
+without touching the console — useful after a TextMateSharp or .NET upgrade.
+
+## Development build (single-file exe)
 
 ```powershell
 dotnet publish src/Nib/Nib.csproj -c Release
 # -> src/Nib/bin/Release/net10.0/win-x64/publish/nib.exe
 ```
 
-Publish settings live in the csproj: framework-dependent (needs the .NET runtime
-installed), single-file, ReadyToRun, `win-x64`. `IncludeNativeLibrariesForSelfExtract`
-is set ahead of phase 5, when TextMateSharp's native Oniguruma wrapper arrives.
+Publish settings live in the csproj: **framework-dependent** (needs the .NET
+runtime installed), single-file, ReadyToRun, `win-x64`.
+`IncludeNativeLibrariesForSelfExtract` bundles TextMateSharp's native Oniguruma
+wrapper into the exe; first launch extracts it to `%TEMP%\.net\nib\<hash>`.
+
+This build is for you, on this machine. To hand nib to anyone else, use the
+release script below — a framework-dependent exe fails at launch on a box without
+the .NET runtime, with an error that explains nothing.
+
+## Releasing
+
+```powershell
+./tools/release.ps1 -Version 0.6.0 -WhatIf   # see what it will do
+./tools/release.ps1 -Version 0.6.0
+```
+
+Produces `dist/nib-0.6.0-win-x64.zip` plus a `.sha256` sidecar. The zip contains
+`nib.exe`, `install.ps1`, `README.md`, `LICENSE` and `VERSION.txt`.
+
+The script refuses to run from a dirty working tree (`-Force` overrides), runs the
+tests, publishes, smoke-tests the staged exe with `--version` and `--soak`, then
+zips. `dist/` is gitignored.
+
+**Release publishes are self-contained; ordinary builds are not.** `SelfContained`
+stays `false` in the csproj because setting it there makes every `dotnet build`
+copy the whole runtime into `bin/`, which wrecks the dev loop. `release.ps1` passes
+it on the publish command line instead. The cost is size — expect **70–90 MB**
+against ~5 MB framework-dependent — and the benefit is that the zip runs anywhere
+with no prerequisites.
+
+Two settings are deliberately absent, and adding them will cost you an afternoon:
+
+- **`PublishTrimmed`** — TextMateSharp resolves grammar rule types reflectively.
+  The trimmer strips them and the failure surfaces much later as a null grammar,
+  not as a build error.
+- **`EnableCompressionInSingleFile`** — roughly halves the zip, but decompresses on
+  *every* launch, and startup is already 135 ms against a sub-100 ms goal.
+
+Version comes from `<Version>` in [src/Nib/Nib.csproj](src/Nib/Nib.csproj);
+`release.ps1` overrides it with `-p:Version=`. Bump the csproj value when you cut a
+release so `nib --version` from a plain dev build isn't lying.
 
 ## Tests
-
-No test project exists yet — `tests/` is a placeholder for phase 3+. Once
-`tests/Nib.Tests/Nib.Tests.csproj` lands, run:
 
 ```powershell
 dotnet test tests/Nib.Tests/Nib.Tests.csproj
