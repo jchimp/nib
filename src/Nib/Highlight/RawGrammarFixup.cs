@@ -26,7 +26,7 @@ namespace Nib.Highlight;
 /// <c>ArgumentNullException</c>. Rewriting <c>begin</c> to <c>match</c> is what the
 /// author meant and what VS Code effectively does.
 ///
-/// Fixing this here rather than in <c>tools/fetch-grammars.ps1</c> keeps the
+/// Fixing this here rather than in <c>scripts/fetch-grammars.ps1</c> keeps the
 /// vendored <c>.gz</c> files byte-identical to upstream, so a diff after
 /// re-fetching shows real upstream change and not our edits. The walk runs once
 /// per grammar on its lazy load, over a tree the JSON parser has just walked.

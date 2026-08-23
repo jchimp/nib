@@ -10,8 +10,8 @@
     <LangVersion>latest</LangVersion>
 
     <!-- One source of truth for the version flag, the release zip name and the
-         VERSION.txt inside it. tools/release.ps1 overrides it on the publish
-         command line, so the value here is only the dev-build default. -->
+         VERSION.txt inside it. scripts/release.ps1 reads this value when no -Version
+         is passed, so a release is whatever is committed here. -->
     <Version>0.6.1</Version>
     <Product>Nib</Product>
     <Company>Jeremy Champion</Company>
@@ -41,7 +41,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Framework-dependent here on purpose: SelfContained=true would make every
          `dotnet build` copy the whole runtime into bin/, which wrecks the fast dev
-         loop. Releases are self-contained — tools/release.ps1 sets it on the
+         loop. Releases are self-contained — scripts/release.ps1 sets it on the
          publish command line instead. -->
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -60,7 +60,7 @@
     <PackageReference Include="TextMateSharp" Version="1.0.66" />
   </ItemGroup>
 
-  <!-- Vendored by tools/fetch-grammars.ps1 and committed; not built from source.
+  <!-- Vendored by scripts/fetch-grammars.ps1 and committed; not built from source.
        The manifest rides along as a resource so language detection reads the same
        extension/filename/shebang table the vendoring script does. -->
   <ItemGroup>

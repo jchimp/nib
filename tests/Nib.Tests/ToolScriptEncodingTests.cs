@@ -4,7 +4,7 @@ using Xunit;
 namespace Nib.Tests;
 
 /// <summary>
-/// The PowerShell tooling under <c>tools/</c> stays pure ASCII.
+/// The PowerShell tooling under <c>scripts/</c> stays pure ASCII.
 ///
 /// Not a style rule. None of those files carry a BOM, so Windows PowerShell 5.1
 /// decodes them as CP-1252 rather than UTF-8. A UTF-8 em dash is three bytes, and
@@ -21,24 +21,36 @@ namespace Nib.Tests;
 /// </summary>
 public class ToolScriptEncodingTests
 {
-    private static string ToolsDirectory()
+    private const string ScriptFolder = "scripts";
+
+    private static string ScriptsDirectory()
     {
-        // Walk up from the test binary to the repo root; the layout is fixed.
+        // Anchor on the repo root, not on the folder being looked for. Walking up
+        // for a bare folder name climbs out of the repo the moment it is missing:
+        // when this folder was called tools/ and got renamed, the walk reached
+        // C:\tools and started ASCII-linting unrelated personal scripts, reporting
+        // them as failures of this project. Missing scripts/ is now a clear failure
+        // at the repo root instead of a search that succeeds somewhere else.
         DirectoryInfo? dir = new(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "tools")))
+        while (dir is not null && !IsRepoRoot(dir))
         {
             dir = dir.Parent;
         }
 
         Assert.NotNull(dir);
-        return Path.Combine(dir!.FullName, "tools");
+        string scripts = Path.Combine(dir!.FullName, ScriptFolder);
+        Assert.True(Directory.Exists(scripts), $"no {ScriptFolder}/ under the repo root {dir.FullName}");
+        return scripts;
     }
+
+    private static bool IsRepoRoot(DirectoryInfo dir) =>
+        File.Exists(Path.Combine(dir.FullName, "src", "Nib", "Nib.csproj"));
 
     [Fact]
     public void PowerShellScriptsAreAscii()
     {
-        string tools = ToolsDirectory();
-        string[] scripts = Directory.GetFiles(tools, "*.ps1", SearchOption.AllDirectories);
+        string dir = ScriptsDirectory();
+        string[] scripts = Directory.GetFiles(dir, "*.ps1", SearchOption.AllDirectories);
         Assert.NotEmpty(scripts);
 
         var offenders = new List<string>();

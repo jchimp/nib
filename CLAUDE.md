@@ -50,7 +50,7 @@ src/Nib/
   Commands/      Keymap, Commands                                     (phase 3+)
   Resources/     Grammars/*.json.gz, Themes/*.json.gz  (generated, committed)
 grammars/manifest.json
-tools/fetch-grammars.ps1
+scripts/fetch-grammars.ps1
 tests/Nib.Tests/
 ```
 
@@ -96,10 +96,10 @@ dotnet run --no-build --project src/Nib/Nib.csproj -- [file]
 Refresh vendored grammars (not part of the build; the `.gz` files are committed):
 
 ```powershell
-./tools/fetch-grammars.ps1 -Force
+./scripts/fetch-grammars.ps1 -Force
 ```
 
-**Releasing.** `./tools/release.ps1 -Version x.y.z` → `dist/nib-x.y.z-win-x64.zip`
+**Releasing.** `./scripts/release.ps1` → `dist/nib-x.y.z-win-x64.zip`
 (exe + `install.ps1` + docs + SHA256). Details in BUILD.md. Two things about it are
 load-bearing:
 
@@ -141,7 +141,7 @@ hypothetical. Verify a change to that code by checking `GetValueKind('Path')` is
 still `ExpandString` and the raw value is byte-identical after install-then-
 uninstall.
 
-**Keep `tools/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
+**Keep `scripts/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
 5.1 decodes them as CP-1252, not UTF-8. A UTF-8 em dash is three bytes and the last
 lands on an ASCII `"` in that code page — which terminates a string literal
 mid-line and swallows everything after it. It does **not** raise a parse error: one

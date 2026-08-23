@@ -214,7 +214,7 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 - `%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off ← next
 - ~~`nib --version`, `--help`~~ — done. `+LINE file` was listed here as done
   and was not; it landed in phase 6a alongside go-to-line.
-- Distribution: `tools/release.ps1` builds a self-contained zip with an installer.
+- Distribution: `scripts/release.ps1` builds a self-contained zip with an installer.
   Done ahead of the rest of phase 6, since nothing else here is testable by anyone
   who cannot install it. See BUILD.md
 
