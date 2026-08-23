@@ -12,7 +12,7 @@
     <!-- One source of truth for the version flag, the release zip name and the
          VERSION.txt inside it. tools/release.ps1 overrides it on the publish
          command line, so the value here is only the dev-build default. -->
-    <Version>0.6.0</Version>
+    <Version>0.6.1</Version>
     <Product>Nib</Product>
     <Company>Jeremy Champion</Company>
     <Description>A nano-style console text editor for Windows.</Description>

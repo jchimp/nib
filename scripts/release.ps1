@@ -28,6 +28,9 @@
 
 .PARAMETER Version
     Release version, x.y.z. Stamped into the assembly, the zip name and VERSION.txt.
+    Optional: with no -Version the script reads <Version> from the csproj, which is
+    where the number belongs. Pass it only for a one-off build under a version you
+    do not want committed.
 
 .PARAMETER OutputRoot
     Where dist artifacts land. Defaults to <repo>/dist.
@@ -39,14 +42,16 @@
     Allow a release from a dirty working tree.
 
 .EXAMPLE
-    ./tools/release.ps1 -Version 0.6.0 -WhatIf
+    ./scripts/release.ps1 -WhatIf
 
 .EXAMPLE
-    ./tools/release.ps1 -Version 0.6.0
+    ./scripts/release.ps1
+
+.EXAMPLE
+    ./scripts/release.ps1 -Version 0.7.0-rc -Force
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(Mandatory)]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string] $Version,
 
