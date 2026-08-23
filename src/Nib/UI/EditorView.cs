@@ -22,6 +22,15 @@ public sealed class EditorView
     // Used when the active theme declares no editor.selectionBackground, and by the
     // no-highlighting path. Foreground is left alone so text stays readable on it.
     private static readonly Color DefaultSelectionBg = Color.Rgb(0x26, 0x4F, 0x78);
+    // Deliberately dim and theme-independent. The gutter is chrome, not content: it
+    // has to stay quieter than the least important token on screen or it competes
+    // with the text for attention. A theme hook (editorLineNumber.foreground) can
+    // come later if a theme ever looks wrong with it.
+    private static readonly Color GutterFg = Color.Rgb(0x6E, 0x76, 0x81);
+
+    // Below this many columns of text, the gutter costs more than it is worth and
+    // is dropped rather than squeezing the content it exists to index.
+    private const int MinTextColumns = 20;
 
     private readonly Screen _screen;
     private readonly Viewport _viewport;
@@ -66,6 +75,42 @@ public sealed class EditorView
     /// <summary>Text rows between the title and the bottom bars.</summary>
     public int TextRows => Math.Max(0, _screen.Height - 4);
 
+    /// <summary>Whether the line-number gutter is drawn (Alt+N). Off by default, as in nano.</summary>
+    public bool ShowLineNumbers { get; set; }
+
+    /// <summary>
+    /// Columns the gutter occupies, including its one-space separator; 0 when it is
+    /// off or would not leave enough room for text.
+    ///
+    /// Recomputed per use rather than cached, because the buffer grows: a file that
+    /// crosses from 999 to 1000 lines needs a wider gutter on the very next frame,
+    /// and a stale width would paint numbers over the first column of text.
+    /// </summary>
+    public int GutterWidth
+    {
+        get
+        {
+            if (!ShowLineNumbers) return 0;
+            int width = DigitCount(_buffer.LineCount) + 1;
+            return _screen.Width - width >= MinTextColumns ? width : 0;
+        }
+    }
+
+    /// <summary>
+    /// Screen columns available to text, once the gutter has taken its share. The
+    /// horizontal scroll must be calibrated against this and not the screen width —
+    /// otherwise the caret slides under the gutter on a long line and the rightmost
+    /// columns become unreachable.
+    /// </summary>
+    public int TextColumns => Math.Max(0, _screen.Width - GutterWidth);
+
+    private static int DigitCount(int value)
+    {
+        int digits = 1;
+        while (value >= 10) { value /= 10; digits++; }
+        return digits;
+    }
+
     public void Render()
     {
         _screen.Clear(Cell.Blank);
@@ -105,9 +150,12 @@ public sealed class EditorView
     private void DrawLine(int y, int bufferRow, string line)
     {
         int first = _viewport.FirstColumn;
-        int width = _screen.Width;
+        int gutter = GutterWidth;
+        int width = _screen.Width - gutter;
         int col = 0;
         int charIndex = 0;
+
+        DrawGutter(y, bufferRow, gutter);
 
         int selStart = 0, selEnd = 0;
         bool hasSel = Selection is { } sel && sel.ContainsRow(bufferRow, _cursor, out selStart, out selEnd);
@@ -142,7 +190,7 @@ public sealed class EditorView
             {
                 char glyph = ch < ' ' || ch == '\x7f' ? '?' : ch;
                 int sx = col - first;
-                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, fg, bg);
+                if (sx >= 0 && sx < width) _screen.Set(gutter + sx, y, glyph, fg, bg);
                 col++;
             }
 
@@ -155,8 +203,22 @@ public sealed class EditorView
         if (hasSel && line.Length < selEnd)
         {
             int sx = col - first;
-            if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, SelectionBg);
+            if (sx >= 0 && sx < width) _screen.Set(gutter + sx, y, ' ', Color.Default, SelectionBg);
         }
+    }
+
+    // Right-aligned in the gutter, with the last column left blank as a separator so
+    // the digits never touch the text. Only rows that hold a line get one; past EOF
+    // the gutter stays blank, as nano's does.
+    private void DrawGutter(int y, int bufferRow, int gutter)
+    {
+        if (gutter == 0) return;
+
+        for (int x = 0; x < gutter; x++) _screen.Set(x, y, ' ', GutterFg, Color.Default);
+
+        string label = (bufferRow + 1).ToString();
+        int x0 = gutter - 1 - label.Length;
+        if (x0 >= 0) _screen.PutText(x0, y, label, GutterFg, Color.Default);
     }
 
     private void DrawMessage()
@@ -199,9 +261,10 @@ public sealed class EditorView
             return;
         }
 
-        int x = _cursor.DisplayColumn - _viewport.FirstColumn;
+        int gutter = GutterWidth;
+        int x = gutter + _cursor.DisplayColumn - _viewport.FirstColumn;
         int y = (_cursor.Row - _viewport.FirstLine) + 1; // +1 for the title row
-        CursorX = Math.Clamp(x, 0, _screen.Width - 1);
+        CursorX = Math.Clamp(x, gutter, Math.Max(gutter, _screen.Width - 1));
         CursorY = Math.Clamp(y, 1, Math.Max(1, TextRows));
     }
 }

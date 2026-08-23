@@ -108,6 +108,19 @@ public class KeymapTests
     }
 
     [Fact]
+    public void Alt_chords_are_the_view_toggles_and_nothing_else()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup();
+
+        Assert.Equal(EditorAction.CycleTheme, Send(Key(ConsoleKey.T, KeyModifiers.Alt), cmd));
+        Assert.Equal(EditorAction.ToggleLineNumbers, Send(Key(ConsoleKey.N, KeyModifiers.Alt), cmd));
+
+        // An unbound Alt chord must not fall through and type its letter.
+        Assert.Equal(EditorAction.None, Send(Key(ConsoleKey.J, KeyModifiers.Alt), cmd));
+        Assert.Equal("hello world", buf.GetLine(0));
+    }
+
+    [Fact]
     public void Escape_collapses_a_selection_without_moving_the_caret()
     {
         (EditorCommands cmd, _, Cursor cur, _) = Setup();

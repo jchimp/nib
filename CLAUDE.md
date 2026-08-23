@@ -242,6 +242,16 @@ wrong or something is flushing mid-frame.
 fall back to no highlighting rather than trying to approximate a theme in 16
 colors.
 
+**The line-number gutter takes columns off the left, and two places have to agree
+about how many.** `EditorView.TextColumns` is the width the text actually gets;
+`Editor.Draw` must hand *that* to `Viewport.EnsureVisible`, not `Screen.Width`.
+Pass the screen width and the horizontal scroll stays calibrated to a window
+wider than the one being drawn — on a long line the caret slides under the gutter
+and the rightmost columns become unreachable, which looks like a scrolling bug
+rather than a gutter one. `GutterWidth` is recomputed per frame rather than
+cached, because a buffer crossing 999 to 1000 lines needs a wider gutter on the
+very next frame.
+
 ---
 
 ## Highlighting model (phase 5)

@@ -40,6 +40,7 @@ exe.
 usage: nib [options] [+LINE] [file]
 
   --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast
+  -l, --line-numbers
   -h, --help
   -v, --version
 ```
@@ -64,6 +65,7 @@ A file that does not exist opens as a new, empty buffer already named for it, so
 | Ctrl+G | Go to line |
 | Ctrl+H | Help |
 | Alt+T | Cycle theme |
+| Alt+N | Toggle line numbers |
 
 Ctrl+Q is the exit key; Ctrl+X keeps nano's context-dependent meaning so both
 habits work. Copying collapses the selection rather than leaving it painted.

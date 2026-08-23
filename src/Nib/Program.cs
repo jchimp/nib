@@ -23,6 +23,7 @@ internal static class Program
         string? file = null;
         string? theme = null;
         int startLine = 0; // 0 = unset; nano's +LINE
+        bool lineNumbers = false;
         var positional = new List<string>();
 
         for (int i = 0; i < args.Length; i++)
@@ -33,6 +34,7 @@ internal static class Program
                 case "--probe": probe = true; break;
                 case "--soak": soak = true; break;
                 case "--theme": theme = i + 1 < args.Length ? args[++i] : null; break;
+                case "--line-numbers" or "-l": lineNumbers = true; break;
                 case "--help" or "-h": PrintHelp(); return 0;
                 case "--version" or "-v": PrintVersion(); return 0;
                 default:
@@ -106,7 +108,7 @@ internal static class Program
         try
         {
             if (probe) Probe.Run(host);
-            else new Editor(host, buffer!, theme, openingMessage, startLine).Run();
+            else new Editor(host, buffer!, theme, openingMessage, startLine, lineNumbers).Run();
             return 0;
         }
         finally
@@ -124,6 +126,8 @@ internal static class Program
         Console.WriteLine("usage: nib [options] [+LINE] [file]");
         Console.WriteLine();
         Console.WriteLine("  --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast");
+        Console.WriteLine("  -l, --line-numbers");
+        Console.WriteLine("                 show the line-number gutter (Alt+N toggles it)");
         Console.WriteLine("  --probe        run the phase-1 terminal probe");
         Console.WriteLine("  --soak [dir] [passes]");
         Console.WriteLine("                 tokenizer soak test; not part of the editor");
@@ -136,7 +140,8 @@ internal static class Program
         Console.WriteLine("      Shift+move selects; Esc clears the selection; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
         Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
-        Console.WriteLine("      Ctrl+G go to line; Ctrl+H help; Alt+T cycle theme.");
+        Console.WriteLine("      Ctrl+G go to line; Ctrl+H help;");
+        Console.WriteLine("      Alt+T cycle theme; Alt+N toggle line numbers.");
     }
 
     private static void PrintVersion()
@@ -193,7 +198,8 @@ internal sealed class Editor
         TextBuffer buffer,
         string? themeId,
         string? openingMessage = null,
-        int startLine = 0)
+        int startLine = 0,
+        bool lineNumbers = false)
     {
         _host = host;
         _buffer = buffer;
@@ -210,6 +216,7 @@ internal sealed class Editor
         // no colour, no error, no reason for the user to care.
         _highlighter = TextMateHighlighter.Create(buffer, themeId);
         _view.Highlighter = _highlighter;
+        _view.ShowLineNumbers = lineNumbers;
 
         // `+LINE` past the end of the file lands on the last line rather than
         // refusing — the prompt reports out-of-range, but a command line is not a
@@ -251,9 +258,10 @@ internal sealed class Editor
                     {
                         case EditorAction.Save: DoSave(); break;
                         case EditorAction.Quit: if (TryQuit()) return; break;
-                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Go to: ^G  Exit: ^Q  Theme: Alt+T"; break;
+                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Go to: ^G  Exit: ^Q  Theme: Alt+T  Numbers: Alt+N"; break;
                         case EditorAction.GoToLine: DoGoToLine(); break;
                         case EditorAction.CycleTheme: CycleTheme(); break;
+                        case EditorAction.ToggleLineNumbers: ToggleLineNumbers(); break;
                     }
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -277,6 +285,14 @@ internal sealed class Editor
         _view.Message = $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save";
     }
 
+    // Alt+N. Says which way it went, because on a short file the gutter is narrow
+    // enough that the change is easy to miss.
+    private void ToggleLineNumbers()
+    {
+        _view.ShowLineNumbers = !_view.ShowLineNumbers;
+        _view.Message = _view.ShowLineNumbers ? "Line numbers on" : "Line numbers off";
+    }
+
     // Alt+T. A theme the grammar-less path can't honour just says so rather than
     // silently doing nothing.
     private void CycleTheme()
@@ -293,7 +309,10 @@ internal sealed class Editor
     private void Draw()
     {
         _viewport.ClampVertical(_buffer.LineCount);
-        _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _screen.Width);
+        // TextColumns, not the screen width: the line-number gutter takes columns off
+        // the left, and scrolling calibrated to the full width slides the caret under
+        // it on a long line and strands the rightmost columns.
+        _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _view.TextColumns);
         _highlighter.Pump();
         _highlighter.TokenizeWindow(_viewport.FirstLine, _view.TextRows);
         _view.Render();

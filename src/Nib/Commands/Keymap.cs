@@ -15,6 +15,7 @@ public enum EditorAction
     Help,
     GoToLine,
     CycleTheme,
+    ToggleLineNumbers,
 }
 
 /// <summary>
@@ -33,10 +34,19 @@ public static class Keymap
         Model.Cursor cur = cmd.Cursor;
         bool ext = ev.Shift; // Shift held → extend the selection through the move
 
-        // Alt+T cycles the theme. Alt, not Ctrl: every Ctrl chord is already spoken
-        // for by the nano and CUA bindings, and taking one for a cosmetic toggle
-        // would cost muscle memory that matters more.
-        if (ev.Alt) return ev.Key == ConsoleKey.T ? EditorAction.CycleTheme : EditorAction.None;
+        // Alt, not Ctrl: every Ctrl chord is already spoken for by the nano and CUA
+        // bindings, and taking one for a cosmetic toggle would cost muscle memory
+        // that matters more. Alt+N rather than nano's M-# for the same reason a
+        // mnemonic beats a symbol you have to reach for.
+        if (ev.Alt)
+        {
+            return ev.Key switch
+            {
+                ConsoleKey.T => EditorAction.CycleTheme,
+                ConsoleKey.N => EditorAction.ToggleLineNumbers,
+                _ => EditorAction.None,
+            };
+        }
 
         if (ev.Ctrl)
         {

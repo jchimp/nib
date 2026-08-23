@@ -22,6 +22,15 @@ ticks phase 6's own "two weeks of daily use". Next: `%APPDATA%\nib\config.toml`,
 
 ## Progress Log
 
+### 2026-08-23 (line-number gutter)
+- `Alt+N` toggles a line-number gutter; `-l` / `--line-numbers` turns it on at startup. Default off, as nano's is. Alt rather than Ctrl for the same reason Alt+T is: every Ctrl chord is spoken for. Alt+N rather than nano's M-# because a mnemonic beats a symbol you have to reach for.
+- `EditorView` owns it: `GutterWidth` (digits in `LineCount`, plus a one-space separator) and `TextColumns` (`Width - GutterWidth`). Recomputed per frame rather than cached - a buffer crossing 999 to 1000 lines needs a wider gutter on the very next frame, and a stale width would paint digits over the first column of text.
+- The part that would have shipped as a bug: `Editor.Draw` passed `_screen.Width` to `Viewport.EnsureVisible`. With a gutter that leaves the horizontal scroll calibrated to a window wider than the one being drawn, so on a long line the caret slides under the gutter and the rightmost columns cannot be reached - and it reads as a scrolling bug, not a gutter one. It now passes `_view.TextColumns`. Written up in CLAUDE.md's rendering section.
+- Under 20 columns of text the gutter is dropped rather than drawn, so a narrow terminal loses the index instead of the content.
+- Gutter colour is a fixed dim grey, deliberately theme-independent: it is chrome, and has to stay quieter than the least important token on screen. A theme hook (`editorLineNumber.foreground`) can come later.
+- Tests: 201 green (was 188). New `LineNumberGutterTests` - width against 9/10/99/100/1000 lines, right-alignment and the blank separator, the narrow-terminal fallback, caret offset, blank gutter past EOF, and the one that matters most: horizontally scrolled text still starting after the gutter. `Screen.CellAt` added as an internal test affordance, alongside `TerminalWriter.DebugSnapshot`. Plus an Alt-chord case in `KeymapTests` covering both toggles and an unbound Alt chord not typing its letter.
+- The persistent setting is deliberately not here: it is one key in `config.toml`, which is the next item.
+
 ### 2026-08-23 (phase 6a — keymap, new-file, TypeScript)
 - Cleared the six todos in `docs/private/JPC-TODO.md`, all of them things daily use surfaced and none of them visible from reading the code.
 - **`nib <new-name>`** now opens an empty buffer already bound to that path — nano's behaviour — so Ctrl+S writes it with no Save-as prompt. `FileIo.Save` already had the `File.Move` branch for a destination that does not exist, so this is a `TextBuffer.Empty(path)` and a "New File" message, not new I/O. The directory is still checked: a typo'd *directory* is an error on the ordinary shell as before, because a buffer that can never be saved is worse than an error, and the user would only find out after typing into it.

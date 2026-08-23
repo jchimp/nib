@@ -70,6 +70,14 @@ public sealed class Screen
         _back[y * Width + x] = new Cell(ch, fg, bg);
     }
 
+    /// <summary>
+    /// The back grid's cell at (x,y). A test affordance, like TerminalWriter's
+    /// snapshot — it lets a renderer test assert on what was painted without a
+    /// console. Internal on purpose: nothing in the editor reads the grid back.
+    /// </summary>
+    internal Cell CellAt(int x, int y) =>
+        (uint)x >= (uint)Width || (uint)y >= (uint)Height ? Cell.Blank : _back[y * Width + x];
+
     /// <summary>Write a run left-to-right from (x,y), clipping at the right edge. Off-grid rows are dropped.</summary>
     public void PutText(int x, int y, ReadOnlySpan<char> text, Color fg, Color bg)
     {
