@@ -137,6 +137,21 @@ public sealed class EditorCommands
     public void PageUp(int rows) { for (int i = 0; i < rows; i++) Cursor.Up(); }
     public void PageDown(int rows) { for (int i = 0; i < rows; i++) Cursor.Down(); }
 
+    /// <summary>Collapse any selection without moving the caret (Esc).</summary>
+    public void ClearSelection() => _selection.Clear();
+
+    /// <summary>
+    /// Jump to a 1-based line, as the go-to-line prompt and <c>+LINE</c> both do.
+    /// Returns false — and does not move — when the line is outside the buffer, so
+    /// the caller can say so rather than silently landing somewhere else.
+    /// </summary>
+    public bool TryGoToLine(int oneBasedLine)
+    {
+        if (oneBasedLine < 1 || oneBasedLine > _buffer.LineCount) return false;
+        Move(() => Cursor.MoveTo(oneBasedLine - 1, 0), extend: false);
+        return true;
+    }
+
     public void SelectAll()
     {
         Cursor.DocumentStart();
@@ -146,11 +161,16 @@ public sealed class EditorCommands
 
     // ---- clipboard ----------------------------------------------------------
 
+    // Copy collapses the selection, unlike Notepad and VS Code, which leave it
+    // painted. Deliberate: the highlight left behind after a copy reads as "still
+    // armed" and the only way to drop it was to move the caret. The cost is that
+    // Ctrl+C twice no longer re-copies the same span.
     public void Copy()
     {
         if (!_selection.IsActive(Cursor)) return;
         (TextPosition start, TextPosition end) = SelectionRange();
         _clipboard.SetText(ToCrlf(_buffer.GetRange(start, end)));
+        _selection.Clear();
     }
 
     public void Cut()

@@ -23,6 +23,10 @@ public class LanguageDetectorTests
     [InlineData("setup.py", "source.python")]
     [InlineData("run.sh", "source.shell")]
     [InlineData("build.bat", "source.batchfile")]
+    [InlineData("app.ts", "source.ts")]
+    [InlineData("loader.mts", "source.ts")]
+    [InlineData("Picker.tsx", "source.tsx")]
+    [InlineData("bundle.js", "source.js")]              // .ts arriving did not steal .js
     public void Detects_by_extension(string name, string expected) =>
         Assert.Equal(expected, Detector.Detect(name, null));
 

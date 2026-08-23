@@ -8,8 +8,9 @@ using Nib.Ui;
 namespace Nib;
 
 /// <summary>
-/// Entry point and the phase-3 editor loop. <c>nib &lt;file&gt;</c> opens a file for
-/// editing (or an empty buffer with no argument); <c>nib --probe</c> runs the
+/// Entry point and the editor loop. <c>nib &lt;file&gt;</c> opens a file for editing
+/// — or, if it does not exist yet, an empty buffer already named for it, so a save
+/// needs no prompt. <c>+LINE</c> opens at a line; <c>nib --probe</c> runs the
 /// phase-1 terminal probe. Loading and saving go through <see cref="FileIo"/>, so
 /// bytes, encoding, and line endings are preserved.
 /// </summary>
@@ -21,6 +22,7 @@ internal static class Program
         bool soak = false;
         string? file = null;
         string? theme = null;
+        int startLine = 0; // 0 = unset; nano's +LINE
         var positional = new List<string>();
 
         for (int i = 0; i < args.Length; i++)
@@ -34,7 +36,11 @@ internal static class Program
                 case "--help" or "-h": PrintHelp(); return 0;
                 case "--version" or "-v": PrintVersion(); return 0;
                 default:
-                    if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
+                    // `+123` opens at a line, as nano does. It does not start with '-',
+                    // so without this it would be taken for the filename.
+                    if (a.Length > 1 && a[0] == '+' && int.TryParse(a[1..], out int n) && n > 0)
+                        startLine = n;
+                    else if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
                     break;
             }
         }
@@ -50,11 +56,34 @@ internal static class Program
         // Load before touching the console: a bad path should print to a normal
         // shell, not from inside the alternate screen.
         TextBuffer? buffer = null;
+        string? openingMessage = null;
         if (!probe)
         {
             try
             {
-                buffer = file is null ? TextBuffer.Empty() : FileIo.Load(file);
+                if (file is null)
+                {
+                    buffer = TextBuffer.Empty();
+                }
+                else if (File.Exists(file))
+                {
+                    buffer = FileIo.Load(file);
+                }
+                else if (Directory.Exists(Path.GetDirectoryName(Path.GetFullPath(file)) ?? "."))
+                {
+                    // `nib newfile.conf` starts an empty buffer already bound to that
+                    // path, so Ctrl+S writes it without a prompt — nano's behaviour, and
+                    // the reason FileIo.Save has a File.Move branch. The directory check
+                    // matters: without it a typo'd path opens a buffer that can never be
+                    // saved, and the user only finds out after typing into it.
+                    buffer = TextBuffer.Empty(file);
+                    openingMessage = "New File";
+                }
+                else
+                {
+                    Console.Error.WriteLine($"nib: {file}: directory does not exist");
+                    return 1;
+                }
             }
             catch (Exception ex)
             {
@@ -77,7 +106,7 @@ internal static class Program
         try
         {
             if (probe) Probe.Run(host);
-            else new Editor(host, buffer!, theme).Run();
+            else new Editor(host, buffer!, theme, openingMessage, startLine).Run();
             return 0;
         }
         finally
@@ -90,9 +119,9 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine("nib — a console text editor (phase 5: syntax highlighting)");
+        Console.WriteLine("nib — a console text editor");
         Console.WriteLine();
-        Console.WriteLine("usage: nib [options] [file]");
+        Console.WriteLine("usage: nib [options] [+LINE] [file]");
         Console.WriteLine();
         Console.WriteLine("  --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast");
         Console.WriteLine("  --probe        run the phase-1 terminal probe");
@@ -101,11 +130,13 @@ internal static class Program
         Console.WriteLine("  -h, --help");
         Console.WriteLine("  -v, --version");
         Console.WriteLine();
+        Console.WriteLine("A file that does not exist opens as a new, empty buffer under that name.");
+        Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
-        Console.WriteLine("      Shift+move selects; Ctrl+A select all;");
+        Console.WriteLine("      Shift+move selects; Esc clears the selection; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
-        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help;");
-        Console.WriteLine("      Alt+T cycle theme.");
+        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
+        Console.WriteLine("      Ctrl+G go to line; Ctrl+H help; Alt+T cycle theme.");
     }
 
     private static void PrintVersion()
@@ -157,7 +188,12 @@ internal sealed class Editor
     // throws "Collection was modified". Separate buffer, never nested modally.
     private readonly List<InputEvent> _modalBatch = new(64);
 
-    public Editor(ConsoleHost host, TextBuffer buffer, string? themeId)
+    public Editor(
+        ConsoleHost host,
+        TextBuffer buffer,
+        string? themeId,
+        string? openingMessage = null,
+        int startLine = 0)
     {
         _host = host;
         _buffer = buffer;
@@ -174,6 +210,14 @@ internal sealed class Editor
         // no colour, no error, no reason for the user to care.
         _highlighter = TextMateHighlighter.Create(buffer, themeId);
         _view.Highlighter = _highlighter;
+
+        // `+LINE` past the end of the file lands on the last line rather than
+        // refusing — the prompt reports out-of-range, but a command line is not a
+        // conversation and silently doing the nearest sensible thing is nano's habit.
+        if (startLine > 0) _commands.TryGoToLine(Math.Min(startLine, buffer.LineCount));
+
+        // Cleared by the next keystroke, which is the right lifetime for "New File".
+        _view.Message = openingMessage ?? "";
     }
 
     public void Run()
@@ -207,7 +251,8 @@ internal sealed class Editor
                     {
                         case EditorAction.Save: DoSave(); break;
                         case EditorAction.Quit: if (TryQuit()) return; break;
-                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Theme: Alt+T"; break;
+                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Go to: ^G  Exit: ^Q  Theme: Alt+T"; break;
+                        case EditorAction.GoToLine: DoGoToLine(); break;
                         case EditorAction.CycleTheme: CycleTheme(); break;
                     }
                 }
@@ -279,6 +324,27 @@ internal sealed class Editor
             _view.Message = $"Error: {ex.Message}";
             return false;
         }
+    }
+
+    // Ctrl+G. Reuses the save-as prompt rather than growing a second modal editor.
+    // An unparseable or out-of-range line says so and leaves the caret alone; Esc
+    // cancels without a message, because the user already knows they cancelled.
+    private void DoGoToLine()
+    {
+        string? entered = RunPrompt("Go to line: ");
+        if (entered is null) return;
+
+        entered = entered.Trim();
+        if (entered.Length == 0) return;
+
+        if (!int.TryParse(entered, out int line))
+        {
+            _view.Message = $"Not a line number: {entered}";
+            return;
+        }
+
+        if (!_commands.TryGoToLine(line))
+            _view.Message = $"No line {line} (buffer has {_buffer.LineCount})";
     }
 
     // nano-style line count: the trailing empty, unterminated line (from a file

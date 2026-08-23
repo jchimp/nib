@@ -37,30 +37,41 @@ exe.
 ## Usage
 
 ```
-usage: nib [options] [file]
+usage: nib [options] [+LINE] [file]
 
   --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast
   -h, --help
   -v, --version
 ```
 
+A file that does not exist opens as a new, empty buffer already named for it, so
+`nib newthing.conf` then Ctrl+S writes the file. `+LINE` opens at a line:
+`nib +200 app.log`.
+
 | Keys | |
 |---|---|
 | Arrows / Home / End / PgUp / PgDn | Move |
 | Ctrl+arrows | Move by word |
 | Shift+move | Select |
+| Esc | Clear the selection |
 | Ctrl+A | Select all |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+K / Ctrl+U | Cut line / paste line |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+S or Ctrl+O | Save |
-| Ctrl+X | Quit (with no selection) |
-| Ctrl+G | Help |
+| Ctrl+Q | Quit |
+| Ctrl+X | Cut, or quit with no selection |
+| Ctrl+G | Go to line |
+| Ctrl+H | Help |
 | Alt+T | Cycle theme |
 
-Highlighting covers 14 languages using real VS Code grammars — JSON, YAML, TOML,
-INI, XML, Markdown, SQL, Python, JavaScript, Rust, Go, Bash, PowerShell and Batch.
-Language is detected from the extension, the filename, or a shebang.
+Ctrl+Q is the exit key; Ctrl+X keeps nano's context-dependent meaning so both
+habits work. Copying collapses the selection rather than leaving it painted.
+
+Highlighting covers 16 languages using real VS Code grammars — JSON, YAML, TOML,
+INI, XML, Markdown, SQL, Python, JavaScript, TypeScript, TSX, Rust, Go, Bash,
+PowerShell and Batch. Language is detected from the extension, the filename, or a
+shebang.
 
 ## Building from source
 

@@ -290,7 +290,7 @@ ROADMAP's 5 ms edit budget goes with it.
 
 ### Grammars
 
-19 files, ~777 KB raw, ~95 KB gzipped, embedded as resources. Sources and scope
+21 files, ~1.2 MB raw, ~134 KB gzipped, embedded as resources. Sources and scope
 names are in `grammars/manifest.json`, all verified against the live repos.
 
 **We do not reference the `TextMateSharp.Grammars` NuGet package.** It ships 40+
@@ -308,9 +308,15 @@ Two things about the set that will otherwise waste an afternoon:
   [TextMateSharp loads JSON grammars only](https://github.com/danipen/TextMateSharp),
   so it cannot be used.
 
-Markdown references 61 external scopes for fenced code blocks. The 14 languages
+Markdown references 61 external scopes for fenced code blocks. The 16 languages
 we ship will highlight inside fences; the rest render as plain text. That is
 correct degradation, not a bug.
+
+TypeScript is two grammars, not one. `source.ts` and `source.tsx` are separate
+files upstream — VS Code generates JavaScript's grammar *from* TypeScript's rather
+than the other way round — so `.tsx` needs its own vendored file and gets nothing
+from `source.ts`. Both went through `RawGrammarFixup` and `GrammarStore` clean on
+the first try, which is not the norm for this set.
 
 ### TextMateSharp landmines
 

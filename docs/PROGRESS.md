@@ -1,9 +1,11 @@
 # Project Progress
 
 ## Current Focus
-Phase 5 (syntax highlighting) implemented and unit-tested (158 tests green). All automatable ROADMAP
-acceptance for phase 5 passes; the single criterion not met — sub-100 ms startup — is .NET runtime cost
-that predates the phase. Pending: the interactive hardware run for phases 3, 4 and 5. Next: phase 6 (polish).
+Phase 6 (polish). Phase 6a landed 2026-08-23 on `phase6-keys`: the six keymap/startup papercuts from
+`docs/private/JPC-TODO.md`, plus TypeScript and TSX highlighting. 188 tests green. Nib has been in daily
+use at home and work on config and code files since the phase-5 build with no data loss and no console
+corruption, which discharges most of the interactive acceptance that was outstanding for phases 3-5 and
+ticks phase 6's own "two weeks of daily use". Next: `%APPDATA%\nib\config.toml`, then search and replace.
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
@@ -12,13 +14,26 @@ that predates the phase. Pending: the interactive hardware run for phases 3, 4 a
 - [x] Phase 4 — selection, clipboard, undo: unified edit model, coalescing undo/redo, selection, CUA + ^K/^U clipboard
 - [x] Phase 5 — syntax highlighting: vendored grammars/themes, lazy GrammarStore, ThemeMap, language detection, convergence-cached incremental tokenization, `--theme` + Alt+T
 - [x] Replaced throwaway `Ui/FileDocument` with `Model/TextBuffer` + `Model/FileIo`
-- [ ] Verify phase-3 ROADMAP acceptance on hardware (interactive; the byte round-trip and column-memory checks are unit-tested, the "edit a homelab config" check is not)
-- [ ] Verify phase-4 ROADMAP acceptance on hardware: (1) Shift/Ctrl+Shift selection paints and collapses; (2) ^C/^X/^V and ^K/^U behave; (3) ^X with no selection still prompts to quit; (4) type-word→^Z→^Y and a long undo-to-original session; (5) paste 500 lines with no visible lag; (6) copy→Notepad/browser and back round-trips endings
-- [ ] Verify phase-5 acceptance on hardware: (1) open each of `tests/fixtures/highlight/sample.*` and confirm the colours look right, not merely present; (2) Alt+T cycles all five themes with no artifacts and the selection background tracks the theme; (3) a large YAML file scrolls without visible lag as the lookahead fills it in; (4) colour is correct in legacy `conhost` as well as Windows Terminal, and degrades cleanly if VT processing cannot be set
+- [x] Phase-3/4/5 interactive acceptance — answered by field use rather than a scripted run: daily editing of real config and code files at home and work, no data loss, no shell left broken, selection/clipboard/undo and colour all behaving
+- [ ] The three checks daily use does *not* cover, worth one five-minute sitting: (1) colour in legacy `conhost` as well as Windows Terminal, and clean degradation if VT processing cannot be set; (2) copy → Notepad/browser → back round-trips line endings; (3) a save interrupted mid-write leaves the original intact
+- [ ] Phase 6a hardware pass: `nib newfile.conf` then ^S; `nib +500 <file>`; ^G with a junk value and with Esc; ^H; the 80-column help rows; a real `.ts`/`.tsx` file coloured
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
 ## Progress Log
+
+### 2026-08-23 (phase 6a — keymap, new-file, TypeScript)
+- Cleared the six todos in `docs/private/JPC-TODO.md`, all of them things daily use surfaced and none of them visible from reading the code.
+- **`nib <new-name>`** now opens an empty buffer already bound to that path — nano's behaviour — so Ctrl+S writes it with no Save-as prompt. `FileIo.Save` already had the `File.Move` branch for a destination that does not exist, so this is a `TextBuffer.Empty(path)` and a "New File" message, not new I/O. The directory is still checked: a typo'd *directory* is an error on the ordinary shell as before, because a buffer that can never be saved is worse than an error, and the user would only find out after typing into it.
+- **Ctrl+Q exits.** Ctrl+X keeps its context-dependent meaning (cut a selection, quit without one) so nano and CUA habits both work. Ctrl+C needed no change — it has been copy-only since phase 4; the todo was really asking for a dedicated exit key, and the phrasing suggests ^X-as-exit had been read as ^C-as-exit.
+- **Ctrl+G is go to line, Ctrl+H is help.** Ctrl+H does *not* collide with Backspace: `InputReader` keys off `wVirtualKeyCode`, so Ctrl+H is `ConsoleKey.H` (0x48) and Backspace is `ConsoleKey.Backspace` (0x08), and the 0x08 that Ctrl+H also puts in `UnicodeChar` is blanked there. Commented at the binding, because it reads like a bug and is not one. `KeymapTests` pins it.
+- Go-to-line reuses the Save-as modal (`RunPrompt`) rather than growing a second line editor; the clamp lives in `EditorCommands.TryGoToLine`, which is console-free and therefore testable. Out of range reports and does not move; Esc cancels silently.
+- **`+LINE file` now exists.** ROADMAP said it was done and it was not — `+123` does not start with `-`, so it was being taken for the filename. Past the end of the file it clamps to the last line rather than refusing: a command line is not a conversation.
+- **Copy collapses the selection**, matching Cut. Diverges from Notepad/VS Code deliberately — a highlight left standing after a copy reads as still-armed. Esc now clears a selection too: until now only an unshifted move did, so the very key the todo said shouldn't be *needed* didn't actually *work*.
+- **TypeScript and TSX.** Two grammars, not one: VS Code generates JavaScript's grammar *from* TypeScript's, and ships `source.ts`/`source.tsx` as separate files, so `.tsx` gets nothing from `source.ts`. 231 KB + 228 KB raw → 19.1 KB + 19.6 KB gzipped; embedded payload 95 KB → 134 KB, published exe 1.31 MB against a 10 MB budget. Both loaded and tokenized clean on the first try, which is not this set's usual behaviour — no `RawGrammarFixup` work needed.
+- Tests: 188 green (was 167 after the count assertion, 158 at phase 5). New `KeymapTests` — the chord table had only ever been tested through its effects, which is fine for the verbs and useless for "which key exits" and "is Ctrl+H Backspace". Plus copy-collapses-selection and go-to-line cases in `EditorCommandsTests`, `.ts`/`.tsx`/`.js` in `LanguageDetectorTests`, and `sample.ts`/`sample.tsx` fixtures. Clean build, warnings-as-errors.
+- Not verified here: anything needing a live console. See the phase-6a hardware pass in Open Todos.
+- Next: `%APPDATA%\nib\config.toml` (theme, tab width, mouse on/off — three keys, a missing-file default, no schema), then search and replace.
 
 ### 2026-07-27 (stale selection anchor — crash fix)
 - Jeremy hit the editor exiting once while selecting and pressing ^C, and could not repeat it. Reproduced and fixed; it is a phase-4 bug, not a phase-5 one.

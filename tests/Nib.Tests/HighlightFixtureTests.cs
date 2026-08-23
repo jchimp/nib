@@ -9,7 +9,7 @@ namespace Nib.Tests;
 /// Every language we ship colours a real file of that language.
 ///
 /// This is the ROADMAP's "all languages highlight correctly on a representative
-/// sample file each", made automatic. Eyeballing thirteen files in a terminal
+/// sample file each", made automatic. Eyeballing sixteen files in a terminal
 /// catches a language going dark once; this catches it on every run, and it is the
 /// test that would have failed loudly when XML and Markdown were throwing out of
 /// TextMateSharp's rule compiler.
@@ -38,6 +38,7 @@ public class HighlightFixtureTests
         "sample.ini", "sample.toml", "sample.yaml", "sample.json", "sample.xml",
         "sample.sql", "sample.py", "sample.js", "sample.rs", "sample.go",
         "sample.sh", "sample.ps1", "sample.bat", "sample.md",
+        "sample.ts", "sample.tsx",
     ];
 
     [Theory]

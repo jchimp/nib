@@ -28,7 +28,7 @@ public class GrammarStoreTests
     public void Manifest_ships_the_expected_resource_counts()
     {
         (GrammarManifest manifest, _) = Setup();
-        Assert.Equal(19, manifest.AllScopes.Count());
+        Assert.Equal(21, manifest.AllScopes.Count());
         Assert.Equal(5, manifest.ThemeIds.Count);
         Assert.Equal("dark-plus", manifest.DefaultThemeId);
     }
