@@ -19,7 +19,7 @@ namespace Nib.Tests;
 /// holds no matter which shell, editor or git filter touches the file next.
 /// release.ps1 runs the test suite, so a regression cannot reach a zip.
 /// </summary>
-public class ToolScriptEncodingTests
+public class ScriptEncodingTests
 {
     private const string ScriptFolder = "scripts";
 

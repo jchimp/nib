@@ -51,7 +51,7 @@ $ErrorActionPreference = 'Stop'
 # KEEP THIS FILE PURE ASCII. It has no BOM, so Windows PowerShell 5.1 decodes it as
 # CP-1252: a UTF-8 em dash ends on an ASCII quote there, which silently terminates a
 # string mid-line and makes one function swallow the next. No parse error, wrong
-# code runs. ToolScriptEncodingTests enforces it.
+# code runs. ScriptEncodingTests enforces it.
 
 # Resolved here rather than as param defaults: $PSScriptRoot is not reliably
 # populated while param defaults are being evaluated under `powershell -File`,

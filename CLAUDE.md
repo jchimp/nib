@@ -149,7 +149,7 @@ function absorbs the next and callers quietly run the wrong body. An em dash ins
 a `Write-Host` string made `Add-ToUserPath` execute `Remove-FromUserPath`, and the
 only visible symptom was a `-WhatIf` line with the wrong verb.
 
-`ToolScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
+`ScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
 regression cannot reach a zip. When a script misbehaves in a way that makes no
 sense, check the AST first — `Parser::ParseFile` and print each function's
 `Extent.StartLineNumber`/`EndLineNumber`. A function spanning past its closing brace
