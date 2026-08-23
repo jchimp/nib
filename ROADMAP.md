@@ -165,9 +165,10 @@ it on top of a stable editor means a problem here is contained.
 
 **Acceptance**
 
-- [x] All 14 languages highlight correctly on a representative sample file each
-      (`HighlightFixtureTests` over `tests/fixtures/highlight/`; 14, not 13 — the
-      other five grammars are YAML dependencies and are never selected directly)
+- [x] All 16 languages highlight correctly on a representative sample file each
+      (`HighlightFixtureTests` over `tests/fixtures/highlight/`; 16, not 21 — the
+      other five grammars are YAML dependencies and are never selected directly.
+      TypeScript and TSX were added in phase 6a)
 - [x] YAML highlights (proves the six-file dispatcher chain resolved —
       `GrammarStoreTests` asserts on `meta.stream.yaml`, defined only in the
       delegated grammar)
@@ -205,12 +206,15 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 **Build**
 
 - Search, search-again, replace with confirm-each, case and whole-word toggles
-- Go to line
+- ~~Go to line~~ — done in phase 6a: `^G`, and `+LINE file` on the command line
 - Mouse: click to position, drag to select, wheel to scroll
-- Help screen
-- `%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off
-- ~~`nib --version`, `--help`~~ — done; `+LINE file` to open at a line
-- Distribution: `tools/release.ps1` builds a self-contained zip with an installer.
+- Help screen — still the one-line hint, now on `^H`. The full screen is
+  deferred until search and mouse are in, so it documents a finished keymap
+  rather than being rewritten twice
+- `%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off ← next
+- ~~`nib --version`, `--help`~~ — done. `+LINE file` was listed here as done
+  and was not; it landed in phase 6a alongside go-to-line.
+- Distribution: `scripts/release.ps1` builds a self-contained zip with an installer.
   Done ahead of the rest of phase 6, since nothing else here is testable by anyone
   who cannot install it. See BUILD.md
 
@@ -219,7 +223,10 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 - [ ] Search wraps and reports "not found" without losing cursor position
 - [ ] Replace-all on a 10k-line file is a single undo step
 - [ ] Mouse selection matches keyboard selection semantics exactly
-- [ ] Two weeks of daily use with no data loss and no console corruption
+- [x] Two weeks of daily use with no data loss and no console corruption — in
+      daily use at home and work on config and code files since the phase-5 build,
+      no data loss and no shell left broken. Earned in the field rather than in a
+      scripted run, which is the only way this one was ever going to be answered.
 
 ---
 

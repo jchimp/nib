@@ -8,8 +8,9 @@ using Nib.Ui;
 namespace Nib;
 
 /// <summary>
-/// Entry point and the phase-3 editor loop. <c>nib &lt;file&gt;</c> opens a file for
-/// editing (or an empty buffer with no argument); <c>nib --probe</c> runs the
+/// Entry point and the editor loop. <c>nib &lt;file&gt;</c> opens a file for editing
+/// — or, if it does not exist yet, an empty buffer already named for it, so a save
+/// needs no prompt. <c>+LINE</c> opens at a line; <c>nib --probe</c> runs the
 /// phase-1 terminal probe. Loading and saving go through <see cref="FileIo"/>, so
 /// bytes, encoding, and line endings are preserved.
 /// </summary>
@@ -21,6 +22,8 @@ internal static class Program
         bool soak = false;
         string? file = null;
         string? theme = null;
+        int startLine = 0; // 0 = unset; nano's +LINE
+        bool lineNumbers = false;
         var positional = new List<string>();
 
         for (int i = 0; i < args.Length; i++)
@@ -31,10 +34,15 @@ internal static class Program
                 case "--probe": probe = true; break;
                 case "--soak": soak = true; break;
                 case "--theme": theme = i + 1 < args.Length ? args[++i] : null; break;
+                case "--line-numbers" or "-l": lineNumbers = true; break;
                 case "--help" or "-h": PrintHelp(); return 0;
                 case "--version" or "-v": PrintVersion(); return 0;
                 default:
-                    if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
+                    // `+123` opens at a line, as nano does. It does not start with '-',
+                    // so without this it would be taken for the filename.
+                    if (a.Length > 1 && a[0] == '+' && int.TryParse(a[1..], out int n) && n > 0)
+                        startLine = n;
+                    else if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
                     break;
             }
         }
@@ -50,11 +58,34 @@ internal static class Program
         // Load before touching the console: a bad path should print to a normal
         // shell, not from inside the alternate screen.
         TextBuffer? buffer = null;
+        string? openingMessage = null;
         if (!probe)
         {
             try
             {
-                buffer = file is null ? TextBuffer.Empty() : FileIo.Load(file);
+                if (file is null)
+                {
+                    buffer = TextBuffer.Empty();
+                }
+                else if (File.Exists(file))
+                {
+                    buffer = FileIo.Load(file);
+                }
+                else if (Directory.Exists(Path.GetDirectoryName(Path.GetFullPath(file)) ?? "."))
+                {
+                    // `nib newfile.conf` starts an empty buffer already bound to that
+                    // path, so Ctrl+S writes it without a prompt — nano's behaviour, and
+                    // the reason FileIo.Save has a File.Move branch. The directory check
+                    // matters: without it a typo'd path opens a buffer that can never be
+                    // saved, and the user only finds out after typing into it.
+                    buffer = TextBuffer.Empty(file);
+                    openingMessage = "New File";
+                }
+                else
+                {
+                    Console.Error.WriteLine($"nib: {file}: directory does not exist");
+                    return 1;
+                }
             }
             catch (Exception ex)
             {
@@ -77,7 +108,7 @@ internal static class Program
         try
         {
             if (probe) Probe.Run(host);
-            else new Editor(host, buffer!, theme).Run();
+            else new Editor(host, buffer!, theme, openingMessage, startLine, lineNumbers).Run();
             return 0;
         }
         finally
@@ -90,22 +121,27 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine("nib — a console text editor (phase 5: syntax highlighting)");
+        Console.WriteLine("nib — a console text editor");
         Console.WriteLine();
-        Console.WriteLine("usage: nib [options] [file]");
+        Console.WriteLine("usage: nib [options] [+LINE] [file]");
         Console.WriteLine();
         Console.WriteLine("  --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast");
+        Console.WriteLine("  -l, --line-numbers");
+        Console.WriteLine("                 show the line-number gutter (Alt+N toggles it)");
         Console.WriteLine("  --probe        run the phase-1 terminal probe");
         Console.WriteLine("  --soak [dir] [passes]");
         Console.WriteLine("                 tokenizer soak test; not part of the editor");
         Console.WriteLine("  -h, --help");
         Console.WriteLine("  -v, --version");
         Console.WriteLine();
+        Console.WriteLine("A file that does not exist opens as a new, empty buffer under that name.");
+        Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
-        Console.WriteLine("      Shift+move selects; Ctrl+A select all;");
+        Console.WriteLine("      Shift+move selects; Esc clears the selection; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
-        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+X quit (no selection); Ctrl+G help;");
-        Console.WriteLine("      Alt+T cycle theme.");
+        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
+        Console.WriteLine("      Ctrl+G go to line; Ctrl+H help;");
+        Console.WriteLine("      Alt+T cycle theme; Alt+N toggle line numbers.");
     }
 
     private static void PrintVersion()
@@ -157,7 +193,13 @@ internal sealed class Editor
     // throws "Collection was modified". Separate buffer, never nested modally.
     private readonly List<InputEvent> _modalBatch = new(64);
 
-    public Editor(ConsoleHost host, TextBuffer buffer, string? themeId)
+    public Editor(
+        ConsoleHost host,
+        TextBuffer buffer,
+        string? themeId,
+        string? openingMessage = null,
+        int startLine = 0,
+        bool lineNumbers = false)
     {
         _host = host;
         _buffer = buffer;
@@ -174,6 +216,15 @@ internal sealed class Editor
         // no colour, no error, no reason for the user to care.
         _highlighter = TextMateHighlighter.Create(buffer, themeId);
         _view.Highlighter = _highlighter;
+        _view.ShowLineNumbers = lineNumbers;
+
+        // `+LINE` past the end of the file lands on the last line rather than
+        // refusing — the prompt reports out-of-range, but a command line is not a
+        // conversation and silently doing the nearest sensible thing is nano's habit.
+        if (startLine > 0) _commands.TryGoToLine(Math.Min(startLine, buffer.LineCount));
+
+        // Cleared by the next keystroke, which is the right lifetime for "New File".
+        _view.Message = openingMessage ?? "";
     }
 
     public void Run()
@@ -207,8 +258,13 @@ internal sealed class Editor
                     {
                         case EditorAction.Save: DoSave(); break;
                         case EditorAction.Quit: if (TryQuit()) return; break;
-                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Theme: Alt+T"; break;
+                        // Only what the two help bars do not already show. The old
+                        // text restated them and ran to 137 characters, so the half
+                        // worth reading was clipped off the right edge unseen.
+                        case EditorAction.Help: _view.Message = HelpBar.Hint; break;
+                        case EditorAction.GoToLine: DoGoToLine(); break;
                         case EditorAction.CycleTheme: CycleTheme(); break;
+                        case EditorAction.ToggleLineNumbers: ToggleLineNumbers(); break;
                     }
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -229,7 +285,17 @@ internal sealed class Editor
     private void Recover(Exception ex)
     {
         _cursor.MoveTo(_cursor.Row, _cursor.Col);
-        _view.Message = $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save";
+        _view.SetMessage(
+            $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save",
+            MessageKind.Error);
+    }
+
+    // Alt+N. Says which way it went, because on a short file the gutter is narrow
+    // enough that the change is easy to miss.
+    private void ToggleLineNumbers()
+    {
+        _view.ShowLineNumbers = !_view.ShowLineNumbers;
+        _view.Message = _view.ShowLineNumbers ? "Line numbers on" : "Line numbers off";
     }
 
     // Alt+T. A theme the grammar-less path can't honour just says so rather than
@@ -248,7 +314,10 @@ internal sealed class Editor
     private void Draw()
     {
         _viewport.ClampVertical(_buffer.LineCount);
-        _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _screen.Width);
+        // TextColumns, not the screen width: the line-number gutter takes columns off
+        // the left, and scrolling calibrated to the full width slides the caret under
+        // it on a long line and strands the rightmost columns.
+        _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _view.TextColumns);
         _highlighter.Pump();
         _highlighter.TokenizeWindow(_viewport.FirstLine, _view.TextRows);
         _view.Render();
@@ -276,9 +345,30 @@ internal sealed class Editor
         }
         catch (Exception ex)
         {
-            _view.Message = $"Error: {ex.Message}";
+            _view.SetMessage($"Error: {ex.Message}", MessageKind.Error);
             return false;
         }
+    }
+
+    // Ctrl+G. Reuses the save-as prompt rather than growing a second modal editor.
+    // An unparseable or out-of-range line says so and leaves the caret alone; Esc
+    // cancels without a message, because the user already knows they cancelled.
+    private void DoGoToLine()
+    {
+        string? entered = RunPrompt("Go to line: ");
+        if (entered is null) return;
+
+        entered = entered.Trim();
+        if (entered.Length == 0) return;
+
+        if (!int.TryParse(entered, out int line))
+        {
+            _view.SetMessage($"Not a line number: {entered}", MessageKind.Error);
+            return;
+        }
+
+        if (!_commands.TryGoToLine(line))
+            _view.SetMessage($"No line {line} (buffer has {_buffer.LineCount})", MessageKind.Error);
     }
 
     // nano-style line count: the trailing empty, unterminated line (from a file
@@ -353,7 +443,7 @@ internal sealed class Editor
     // A yes/no/cancel question on the message row. 'y'/'n' or null (Esc).
     private char? Confirm(string message)
     {
-        _view.Message = message;
+        _view.SetMessage(message, MessageKind.Prompt);
         try
         {
             while (true)

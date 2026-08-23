@@ -5,6 +5,23 @@ using Nib.Terminal;
 namespace Nib.Ui;
 
 /// <summary>
+/// What the message row is saying, which decides how it is painted. The row
+/// carries all three and used to render them identically — a failed save looked
+/// exactly like a successful one.
+/// </summary>
+public enum MessageKind
+{
+    /// <summary>Something happened and went fine. "Wrote 42 lines".</summary>
+    Info,
+
+    /// <summary>Something failed. "Error: access denied".</summary>
+    Error,
+
+    /// <summary>Waiting on the user. A save-as prompt, or a Y/N/Esc question.</summary>
+    Prompt,
+}
+
+/// <summary>
 /// Paints the editable buffer through a <see cref="Viewport"/> onto a
 /// <see cref="Screen"/> in the nano layout: a title/status line on top, the text
 /// body, then a message/prompt line and a two-row shortcut bar at the bottom.
@@ -22,14 +39,60 @@ public sealed class EditorView
     // Used when the active theme declares no editor.selectionBackground, and by the
     // no-highlighting path. Foreground is left alone so text stays readable on it.
     private static readonly Color DefaultSelectionBg = Color.Rgb(0x26, 0x4F, 0x78);
+    // Deliberately dim and theme-independent. The gutter is chrome, not content: it
+    // has to stay quieter than the least important token on screen or it competes
+    // with the text for attention. A theme hook (editorLineNumber.foreground) can
+    // come later if a theme ever looks wrong with it.
+    private static readonly Color GutterFg = Color.Rgb(0x6E, 0x76, 0x81);
+
+    // Below this many columns of text, the gutter costs more than it is worth and
+    // is dropped rather than squeezing the content it exists to index.
+    private const int MinTextColumns = 20;
+
+    // Message row. Three tiers, because the row carries all three and painting them
+    // alike meant a failed save read exactly like a successful one. Kept clear of the
+    // bars' teal and of DefaultSelectionBg, so none of them can be mistaken for
+    // another when they share a screen.
+    private static readonly Color MessageInfoFg = Color.Rgb(0xDC, 0xE7, 0xF0);
+    private static readonly Color MessageInfoBg = Color.Rgb(0x2C, 0x3E, 0x50);
+    private static readonly Color MessageErrorFg = Color.Rgb(0xFF, 0xE5, 0xE5);
+    private static readonly Color MessageErrorBg = Color.Rgb(0x8B, 0x22, 0x22);
+    private static readonly Color MessagePromptFg = Color.Rgb(0x1A, 0x1A, 0x1A);
+    private static readonly Color MessagePromptBg = Color.Rgb(0xD7, 0xA2, 0x1A);
+
+    // One space of background either side of the text, so the run reads as a label
+    // rather than as body text that happens to be coloured. The caret has to clear
+    // the same pad, or it lands one cell left of the character it is on.
+    private const int MessagePad = 1;
 
     private readonly Screen _screen;
     private readonly Viewport _viewport;
     private readonly TextBuffer _buffer;
     private readonly Cursor _cursor;
 
-    /// <summary>Transient feedback shown on the message row when no prompt is active ("Wrote 42 lines").</summary>
-    public string Message { get; set; } = "";
+    private string _message = "";
+
+    /// <summary>
+    /// Transient feedback shown on the message row when no prompt is active
+    /// ("Wrote 42 lines"). Assigning resets the kind to <see cref="MessageKind.Info"/>
+    /// — deliberately, so a previous error's styling can never outlive its text and
+    /// paint the next success in red.
+    /// </summary>
+    public string Message
+    {
+        get => _message;
+        set { _message = value; MessageKind = MessageKind.Info; }
+    }
+
+    /// <summary>How <see cref="Message"/> is painted. Set it through <see cref="SetMessage"/>.</summary>
+    public MessageKind MessageKind { get; private set; }
+
+    /// <summary>Set the message text and its severity together.</summary>
+    public void SetMessage(string text, MessageKind kind)
+    {
+        _message = text;
+        MessageKind = kind;
+    }
 
     /// <summary>When set, the message row becomes this modal input line and the caret moves into it.</summary>
     public Prompt? ActivePrompt { get; set; }
@@ -65,6 +128,42 @@ public sealed class EditorView
 
     /// <summary>Text rows between the title and the bottom bars.</summary>
     public int TextRows => Math.Max(0, _screen.Height - 4);
+
+    /// <summary>Whether the line-number gutter is drawn (Alt+N). Off by default, as in nano.</summary>
+    public bool ShowLineNumbers { get; set; }
+
+    /// <summary>
+    /// Columns the gutter occupies, including its one-space separator; 0 when it is
+    /// off or would not leave enough room for text.
+    ///
+    /// Recomputed per use rather than cached, because the buffer grows: a file that
+    /// crosses from 999 to 1000 lines needs a wider gutter on the very next frame,
+    /// and a stale width would paint numbers over the first column of text.
+    /// </summary>
+    public int GutterWidth
+    {
+        get
+        {
+            if (!ShowLineNumbers) return 0;
+            int width = DigitCount(_buffer.LineCount) + 1;
+            return _screen.Width - width >= MinTextColumns ? width : 0;
+        }
+    }
+
+    /// <summary>
+    /// Screen columns available to text, once the gutter has taken its share. The
+    /// horizontal scroll must be calibrated against this and not the screen width —
+    /// otherwise the caret slides under the gutter on a long line and the rightmost
+    /// columns become unreachable.
+    /// </summary>
+    public int TextColumns => Math.Max(0, _screen.Width - GutterWidth);
+
+    private static int DigitCount(int value)
+    {
+        int digits = 1;
+        while (value >= 10) { value /= 10; digits++; }
+        return digits;
+    }
 
     public void Render()
     {
@@ -105,9 +204,12 @@ public sealed class EditorView
     private void DrawLine(int y, int bufferRow, string line)
     {
         int first = _viewport.FirstColumn;
-        int width = _screen.Width;
+        int gutter = GutterWidth;
+        int width = _screen.Width - gutter;
         int col = 0;
         int charIndex = 0;
+
+        DrawGutter(y, bufferRow, gutter);
 
         int selStart = 0, selEnd = 0;
         bool hasSel = Selection is { } sel && sel.ContainsRow(bufferRow, _cursor, out selStart, out selEnd);
@@ -142,7 +244,7 @@ public sealed class EditorView
             {
                 char glyph = ch < ' ' || ch == '\x7f' ? '?' : ch;
                 int sx = col - first;
-                if (sx >= 0 && sx < width) _screen.Set(sx, y, glyph, fg, bg);
+                if (sx >= 0 && sx < width) _screen.Set(gutter + sx, y, glyph, fg, bg);
                 col++;
             }
 
@@ -155,18 +257,54 @@ public sealed class EditorView
         if (hasSel && line.Length < selEnd)
         {
             int sx = col - first;
-            if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, SelectionBg);
+            if (sx >= 0 && sx < width) _screen.Set(gutter + sx, y, ' ', Color.Default, SelectionBg);
         }
     }
 
+    // Right-aligned in the gutter, with the last column left blank as a separator so
+    // the digits never touch the text. Only rows that hold a line get one; past EOF
+    // the gutter stays blank, as nano's does.
+    private void DrawGutter(int y, int bufferRow, int gutter)
+    {
+        if (gutter == 0) return;
+
+        for (int x = 0; x < gutter; x++) _screen.Set(x, y, ' ', GutterFg, Color.Default);
+
+        string label = (bufferRow + 1).ToString();
+        int x0 = gutter - 1 - label.Length;
+        if (x0 >= 0) _screen.PutText(x0, y, label, GutterFg, Color.Default);
+    }
+
+    // The message row is the only chrome that is blank most of the time, so it gets
+    // no background of its own until it has something to say — the colour appearing
+    // is itself the signal. The run hugs the text with one space either side rather
+    // than filling the row: a full-width band directly above the two help bars reads
+    // as a third bar and crowds the bottom of the screen.
     private void DrawMessage()
     {
         int y = MessageRow;
         if (y <= 0) return;
+
+        bool prompting = ActivePrompt is not null;
         string text = ActivePrompt is { } p ? p.Label + p.Input : Message;
-        if (text.Length > _screen.Width) text = text[.._screen.Width];
-        _screen.PutText(0, y, text, Color.Default, Color.Default);
+        if (text.Length == 0) return;
+
+        (Color fg, Color bg) = MessageColors(prompting ? MessageKind.Prompt : MessageKind);
+
+        string padded = new string(' ', MessagePad) + text + new string(' ', MessagePad);
+        if (padded.Length > _screen.Width) padded = padded[.._screen.Width];
+        _screen.PutText(0, y, padded, fg, bg);
     }
+
+    private static (Color Fg, Color Bg) MessageColors(MessageKind kind) => kind switch
+    {
+        MessageKind.Error => (MessageErrorFg, MessageErrorBg),
+        // Dark text on amber, inverted against the other two on purpose: a row that
+        // is waiting on a keystroke should not look like a row that is merely
+        // reporting one.
+        MessageKind.Prompt => (MessagePromptFg, MessagePromptBg),
+        _ => (MessageInfoFg, MessageInfoBg),
+    };
 
     private void DrawHelp()
     {
@@ -194,14 +332,16 @@ public sealed class EditorView
     {
         if (ActivePrompt is { } p)
         {
-            CursorX = Math.Min(_screen.Width - 1, p.Label.Length + p.Caret);
+            // + MessagePad: DrawMessage indents the prompt by its leading pad space.
+            CursorX = Math.Min(_screen.Width - 1, MessagePad + p.Label.Length + p.Caret);
             CursorY = Math.Max(0, MessageRow);
             return;
         }
 
-        int x = _cursor.DisplayColumn - _viewport.FirstColumn;
+        int gutter = GutterWidth;
+        int x = gutter + _cursor.DisplayColumn - _viewport.FirstColumn;
         int y = (_cursor.Row - _viewport.FirstLine) + 1; // +1 for the title row
-        CursorX = Math.Clamp(x, 0, _screen.Width - 1);
+        CursorX = Math.Clamp(x, gutter, Math.Max(gutter, _screen.Width - 1));
         CursorY = Math.Clamp(y, 1, Math.Max(1, TextRows));
     }
 }

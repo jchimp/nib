@@ -18,10 +18,10 @@
     of the build - the .json.gz files are committed.
 
 .EXAMPLE
-    ./tools/fetch-grammars.ps1
+    ./scripts/fetch-grammars.ps1
 
 .EXAMPLE
-    ./tools/fetch-grammars.ps1 -Verbose -Force
+    ./scripts/fetch-grammars.ps1 -Verbose -Force
 #>
 [CmdletBinding()]
 param(

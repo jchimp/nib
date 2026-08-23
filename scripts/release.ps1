@@ -28,6 +28,9 @@
 
 .PARAMETER Version
     Release version, x.y.z. Stamped into the assembly, the zip name and VERSION.txt.
+    Optional: with no -Version the script reads <Version> from the csproj, which is
+    where the number belongs. Pass it only for a one-off build under a version you
+    do not want committed.
 
 .PARAMETER OutputRoot
     Where dist artifacts land. Defaults to <repo>/dist.
@@ -39,14 +42,16 @@
     Allow a release from a dirty working tree.
 
 .EXAMPLE
-    ./tools/release.ps1 -Version 0.6.0 -WhatIf
+    ./scripts/release.ps1 -WhatIf
 
 .EXAMPLE
-    ./tools/release.ps1 -Version 0.6.0
+    ./scripts/release.ps1
+
+.EXAMPLE
+    ./scripts/release.ps1 -Version 0.7.0 -Force
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(Mandatory)]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string] $Version,
 
@@ -67,7 +72,51 @@ if (-not $OutputRoot) { $OutputRoot = Join-Path $repo 'dist' }
 $project = Join-Path $repo 'src\Nib\Nib.csproj'
 $tests   = Join-Path $repo 'tests\Nib.Tests\Nib.Tests.csproj'
 $rid     = 'win-x64'
-$name    = "nib-$Version-$rid"
+
+# --- version ---------------------------------------------------------------
+#
+# The csproj is the source of truth. Reading it here rather than making -Version
+# mandatory means the number that ships is the number in the commit, which is also
+# what makes the dirty-tree check below worth having: a bump has to be committed
+# before it can be released.
+#
+# The cost of a default is that forgetting to bump stops being impossible, so the
+# already-released check further down puts that guard back.
+
+function Get-ProjectVersion {
+    param([Parameter(Mandatory)][string] $ProjectPath)
+
+    $xml = [xml](Get-Content -LiteralPath $ProjectPath -Raw)
+    $node = $xml.SelectSingleNode('/Project/PropertyGroup/Version')
+    if (-not $node) {
+        throw "No <Version> element in $ProjectPath. Add one, or pass -Version explicitly."
+    }
+
+    $value = $node.InnerText.Trim()
+    if ($value -notmatch '^\d+\.\d+\.\d+$') {
+        throw "<Version> in $ProjectPath is '$value', which is not x.y.z. Fix it, or pass -Version explicitly."
+    }
+    return $value
+}
+
+if ($Version) {
+    $versionSource = 'the -Version argument'
+} else {
+    $Version = Get-ProjectVersion -ProjectPath $project
+    $versionSource = $project.Substring($repo.Length + 1)
+}
+
+$name = "nib-$Version-$rid"
+$zip  = Join-Path $OutputRoot "$name.zip"
+
+Write-Host "Version: $Version (from $versionSource)"
+
+# A version already in dist has been built, and probably shipped. Rebuilding it
+# under the same number produces a second artifact with the same name and a
+# different hash, which is the one thing a release number exists to prevent.
+if ((Test-Path -LiteralPath $zip) -and -not $Force) {
+    throw "$name.zip already exists in $OutputRoot. Bump <Version> in the csproj, or re-run with -Force to replace it."
+}
 
 function Invoke-Step {
     param([Parameter(Mandatory)][string] $Label, [Parameter(Mandatory)][scriptblock] $Body)
@@ -214,8 +263,6 @@ Invoke-Step 'Smoke-testing the staged exe' {
 }
 
 # --- 7. zip + hash ---------------------------------------------------------
-
-$zip = Join-Path $OutputRoot "$name.zip"
 
 Invoke-Step 'Packaging' {
     if ($WhatIfPreference) { Write-Host "would write $zip"; return }

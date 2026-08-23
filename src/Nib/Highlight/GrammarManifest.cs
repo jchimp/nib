@@ -5,7 +5,7 @@ namespace Nib.Highlight;
 
 /// <summary>
 /// The vendoring manifest, read back at runtime from the same
-/// <c>grammars/manifest.json</c> that <c>tools/fetch-grammars.ps1</c> downloads
+/// <c>grammars/manifest.json</c> that <c>scripts/fetch-grammars.ps1</c> downloads
 /// from. Embedding the file rather than transcribing it into a C# table keeps one
 /// source of truth: add a language to the manifest, re-run the script, and both
 /// the resources and the detection tables move together.

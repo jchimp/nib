@@ -13,7 +13,9 @@ public enum EditorAction
     Save,
     Quit,
     Help,
+    GoToLine,
     CycleTheme,
+    ToggleLineNumbers,
 }
 
 /// <summary>
@@ -32,10 +34,19 @@ public static class Keymap
         Model.Cursor cur = cmd.Cursor;
         bool ext = ev.Shift; // Shift held → extend the selection through the move
 
-        // Alt+T cycles the theme. Alt, not Ctrl: every Ctrl chord is already spoken
-        // for by the nano and CUA bindings, and taking one for a cosmetic toggle
-        // would cost muscle memory that matters more.
-        if (ev.Alt) return ev.Key == ConsoleKey.T ? EditorAction.CycleTheme : EditorAction.None;
+        // Alt, not Ctrl: every Ctrl chord is already spoken for by the nano and CUA
+        // bindings, and taking one for a cosmetic toggle would cost muscle memory
+        // that matters more. Alt+N rather than nano's M-# for the same reason a
+        // mnemonic beats a symbol you have to reach for.
+        if (ev.Alt)
+        {
+            return ev.Key switch
+            {
+                ConsoleKey.T => EditorAction.CycleTheme,
+                ConsoleKey.N => EditorAction.ToggleLineNumbers,
+                _ => EditorAction.None,
+            };
+        }
 
         if (ev.Ctrl)
         {
@@ -43,9 +54,21 @@ public static class Keymap
             {
                 case ConsoleKey.S:
                 case ConsoleKey.O: return EditorAction.Save;
-                case ConsoleKey.G: return EditorAction.Help;
 
-                case ConsoleKey.X: // cut a selection, otherwise fall through to quit
+                case ConsoleKey.G: return EditorAction.GoToLine;
+
+                // Ctrl+H, not Backspace. InputReader keys off wVirtualKeyCode, so this
+                // is VK_H (0x48) and the Backspace key is VK_BACK (0x08) — two distinct
+                // events, and the 0x08 control code Ctrl+H also produces in UnicodeChar
+                // is blanked there. The Backspace case below is in the non-Ctrl switch
+                // and is untouched. Do not "disambiguate" these.
+                case ConsoleKey.H: return EditorAction.Help;
+
+                // Ctrl+Q always quits. Ctrl+X keeps nano's context-dependent meaning —
+                // cut a selection, quit without one — so both habits work.
+                case ConsoleKey.Q: return EditorAction.Quit;
+
+                case ConsoleKey.X:
                     if (cmd.HasSelection) { cmd.Cut(); return EditorAction.None; }
                     return EditorAction.Quit;
 
@@ -80,6 +103,11 @@ public static class Keymap
             case ConsoleKey.Backspace: cmd.Backspace(); return EditorAction.None;
             case ConsoleKey.Delete: cmd.Delete(); return EditorAction.None;
             case ConsoleKey.Tab: cmd.InsertChar('\t'); return EditorAction.None;
+
+            // Esc collapses a selection. Until now only an unshifted move did, so a
+            // selection the user wanted rid of without moving the caret had no key —
+            // which is the whole reason copy now drops it too.
+            case ConsoleKey.Escape: cmd.ClearSelection(); return EditorAction.None;
         }
 
         // Printable text: astral pairs arrive as Text, everything else as Char.

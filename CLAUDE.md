@@ -50,7 +50,7 @@ src/Nib/
   Commands/      Keymap, Commands                                     (phase 3+)
   Resources/     Grammars/*.json.gz, Themes/*.json.gz  (generated, committed)
 grammars/manifest.json
-tools/fetch-grammars.ps1
+scripts/fetch-grammars.ps1
 tests/Nib.Tests/
 ```
 
@@ -96,10 +96,10 @@ dotnet run --no-build --project src/Nib/Nib.csproj -- [file]
 Refresh vendored grammars (not part of the build; the `.gz` files are committed):
 
 ```powershell
-./tools/fetch-grammars.ps1 -Force
+./scripts/fetch-grammars.ps1 -Force
 ```
 
-**Releasing.** `./tools/release.ps1 -Version x.y.z` → `dist/nib-x.y.z-win-x64.zip`
+**Releasing.** `./scripts/release.ps1` → `dist/nib-x.y.z-win-x64.zip`
 (exe + `install.ps1` + docs + SHA256). Details in BUILD.md. Two things about it are
 load-bearing:
 
@@ -141,7 +141,7 @@ hypothetical. Verify a change to that code by checking `GetValueKind('Path')` is
 still `ExpandString` and the raw value is byte-identical after install-then-
 uninstall.
 
-**Keep `tools/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
+**Keep `scripts/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
 5.1 decodes them as CP-1252, not UTF-8. A UTF-8 em dash is three bytes and the last
 lands on an ASCII `"` in that code page — which terminates a string literal
 mid-line and swallows everything after it. It does **not** raise a parse error: one
@@ -149,7 +149,7 @@ function absorbs the next and callers quietly run the wrong body. An em dash ins
 a `Write-Host` string made `Add-ToUserPath` execute `Remove-FromUserPath`, and the
 only visible symptom was a `-WhatIf` line with the wrong verb.
 
-`ToolScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
+`ScriptEncodingTests` enforces this, and `release.ps1` runs the suite, so a
 regression cannot reach a zip. When a script misbehaves in a way that makes no
 sense, check the AST first — `Parser::ParseFile` and print each function's
 `Extent.StartLineNumber`/`EndLineNumber`. A function spanning past its closing brace
@@ -242,6 +242,16 @@ wrong or something is flushing mid-frame.
 fall back to no highlighting rather than trying to approximate a theme in 16
 colors.
 
+**The line-number gutter takes columns off the left, and two places have to agree
+about how many.** `EditorView.TextColumns` is the width the text actually gets;
+`Editor.Draw` must hand *that* to `Viewport.EnsureVisible`, not `Screen.Width`.
+Pass the screen width and the horizontal scroll stays calibrated to a window
+wider than the one being drawn — on a long line the caret slides under the gutter
+and the rightmost columns become unreachable, which looks like a scrolling bug
+rather than a gutter one. `GutterWidth` is recomputed per frame rather than
+cached, because a buffer crossing 999 to 1000 lines needs a wider gutter on the
+very next frame.
+
 ---
 
 ## Highlighting model (phase 5)
@@ -290,7 +300,7 @@ ROADMAP's 5 ms edit budget goes with it.
 
 ### Grammars
 
-19 files, ~777 KB raw, ~95 KB gzipped, embedded as resources. Sources and scope
+21 files, ~1.2 MB raw, ~134 KB gzipped, embedded as resources. Sources and scope
 names are in `grammars/manifest.json`, all verified against the live repos.
 
 **We do not reference the `TextMateSharp.Grammars` NuGet package.** It ships 40+
@@ -308,9 +318,15 @@ Two things about the set that will otherwise waste an afternoon:
   [TextMateSharp loads JSON grammars only](https://github.com/danipen/TextMateSharp),
   so it cannot be used.
 
-Markdown references 61 external scopes for fenced code blocks. The 14 languages
+Markdown references 61 external scopes for fenced code blocks. The 16 languages
 we ship will highlight inside fences; the rest render as plain text. That is
 correct degradation, not a bug.
+
+TypeScript is two grammars, not one. `source.ts` and `source.tsx` are separate
+files upstream — VS Code generates JavaScript's grammar *from* TypeScript's rather
+than the other way round — so `.tsx` needs its own vendored file and gets nothing
+from `source.ts`. Both went through `RawGrammarFixup` and `GrammarStore` clean on
+the first try, which is not the norm for this set.
 
 ### TextMateSharp landmines
 

@@ -54,6 +54,78 @@ public class EditorCommandsTests
     }
 
     [Fact]
+    public void Copy_collapses_the_selection_and_leaves_the_caret_where_it_was()
+    {
+        (EditorCommands cmd, _, Cursor cur, FakeClipboard clip) = Setup("hello world");
+        Select(cmd, cur, 0, 6, 0, 11);
+        cmd.Copy();
+
+        Assert.Equal("world", clip.Text);
+        Assert.False(cmd.HasSelection);
+        Assert.Equal(0, cur.Row);
+        Assert.Equal(11, cur.Col);
+    }
+
+    [Fact]
+    public void A_shift_move_after_a_copy_selects_afresh_rather_than_extending()
+    {
+        (EditorCommands cmd, _, Cursor cur, FakeClipboard clip) = Setup("hello world");
+        Select(cmd, cur, 0, 0, 0, 5);
+        cmd.Copy();
+
+        // The dropped anchor is the point: extending from column 5, not from 0.
+        cmd.Move(cur.Right, extend: true);
+        cmd.Copy();
+        Assert.Equal(" ", clip.Text);
+    }
+
+    [Fact]
+    public void Copy_with_no_selection_leaves_the_clipboard_alone()
+    {
+        (EditorCommands cmd, _, _, FakeClipboard clip) = Setup("hello world");
+        clip.Text = "earlier";
+        cmd.Copy();
+        Assert.Equal("earlier", clip.Text);
+    }
+
+    [Fact]
+    public void Go_to_line_moves_to_column_zero_and_drops_the_selection()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("one", "two", "three");
+        Select(cmd, cur, 0, 0, 0, 3);
+
+        Assert.True(cmd.TryGoToLine(3));
+        Assert.Equal(2, cur.Row);
+        Assert.Equal(0, cur.Col);
+        Assert.False(cmd.HasSelection);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-4)]
+    [InlineData(4)]
+    public void Go_to_a_line_outside_the_buffer_refuses_and_does_not_move(int line)
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("one", "two", "three");
+        cur.MoveTo(1, 2);
+
+        Assert.False(cmd.TryGoToLine(line));
+        Assert.Equal(1, cur.Row);
+        Assert.Equal(2, cur.Col);
+    }
+
+    [Fact]
+    public void Clear_selection_leaves_the_caret_alone()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("hello world");
+        Select(cmd, cur, 0, 0, 0, 5);
+        cmd.ClearSelection();
+
+        Assert.False(cmd.HasSelection);
+        Assert.Equal(5, cur.Col);
+    }
+
+    [Fact]
     public void Copy_normalizes_multiline_text_to_CRLF_for_windows_apps()
     {
         (EditorCommands cmd, TextBuffer _, Cursor cur, FakeClipboard clip) = Setup("foo", "bar");

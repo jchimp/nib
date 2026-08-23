@@ -2,7 +2,7 @@
   "$comment": [
     "Source of truth for Nib's vendored TextMate grammars.",
     "Every url and scopeName here was verified against the live repositories.",
-    "Total: 19 grammar files, ~777 KB raw, ~95 KB gzipped.",
+    "Total: 21 grammar files, ~1.2 MB raw, ~134 KB gzipped.",
     "Regenerate the embedded resources with tools/fetch-grammars.ps1.",
     "",
     "We deliberately do NOT take a dependency on the TextMateSharp.Grammars",
@@ -108,6 +108,22 @@
       "bytes": 227247,
       "note": "Largest grammar in the set by a wide margin. Also the most likely to hit the tokenizer timeout on minified files — see the MaxTokenizeTime guidance in CLAUDE.md."
     },
+    {
+      "id": "typescript",
+      "scopeName": "source.ts",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+      "extensions": [".ts", ".mts", ".cts"],
+      "bytes": 231555,
+      "note": "Separate grammar from source.js upstream, not a superset include — JavaScript.tmLanguage.json is itself generated from this one. .tsx needs source.tsx below; the two differ only in JSX handling but VS Code ships them as distinct files."
+    },
+    {
+      "id": "typescriptreact",
+      "scopeName": "source.tsx",
+      "url": "https://raw.githubusercontent.com/microsoft/vscode/main/extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+      "extensions": [".tsx"],
+      "bytes": 227983
+    },
+
     {
       "id": "rust",
       "scopeName": "source.rust",
