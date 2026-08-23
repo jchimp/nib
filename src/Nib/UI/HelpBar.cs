@@ -13,4 +13,13 @@ public static class HelpBar
 {
     public static readonly string Row1 = "^H Help   ^C Copy   ^X Cut/Exit   ^V Paste   ^Z Undo   ^Y Redo   ^Q Exit";
     public static readonly string Row2 = "^S Save   ^O SaveAs   ^G Go to line   ^K Cut line   ^U Paste line   ^A All";
+
+    /// <summary>
+    /// The ^H message-row hint: the keys the two rows above have no space for. It
+    /// deliberately does not restate them - the previous version did, ran to 137
+    /// characters, and had its second half clipped off the right edge where nobody
+    /// ever read it. Same 80-column budget as the rows.
+    /// </summary>
+    public static readonly string Hint =
+        "Select: Shift+arrows  Word: ^arrows  Clear: Esc  Theme: Alt+T  Numbers: Alt+N";
 }

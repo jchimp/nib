@@ -258,7 +258,10 @@ internal sealed class Editor
                     {
                         case EditorAction.Save: DoSave(); break;
                         case EditorAction.Quit: if (TryQuit()) return; break;
-                        case EditorAction.Help: _view.Message = "Select: Shift+arrows  Cut/Copy/Paste: ^X/^C/^V  Undo/Redo: ^Z/^Y  Line: ^K/^U  All: ^A  Go to: ^G  Exit: ^Q  Theme: Alt+T  Numbers: Alt+N"; break;
+                        // Only what the two help bars do not already show. The old
+                        // text restated them and ran to 137 characters, so the half
+                        // worth reading was clipped off the right edge unseen.
+                        case EditorAction.Help: _view.Message = HelpBar.Hint; break;
                         case EditorAction.GoToLine: DoGoToLine(); break;
                         case EditorAction.CycleTheme: CycleTheme(); break;
                         case EditorAction.ToggleLineNumbers: ToggleLineNumbers(); break;
@@ -282,7 +285,9 @@ internal sealed class Editor
     private void Recover(Exception ex)
     {
         _cursor.MoveTo(_cursor.Row, _cursor.Col);
-        _view.Message = $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save";
+        _view.SetMessage(
+            $"Internal error ({ex.GetType().Name}: {ex.Message}) — your text is intact, ^S to save",
+            MessageKind.Error);
     }
 
     // Alt+N. Says which way it went, because on a short file the gutter is narrow
@@ -340,7 +345,7 @@ internal sealed class Editor
         }
         catch (Exception ex)
         {
-            _view.Message = $"Error: {ex.Message}";
+            _view.SetMessage($"Error: {ex.Message}", MessageKind.Error);
             return false;
         }
     }
@@ -358,12 +363,12 @@ internal sealed class Editor
 
         if (!int.TryParse(entered, out int line))
         {
-            _view.Message = $"Not a line number: {entered}";
+            _view.SetMessage($"Not a line number: {entered}", MessageKind.Error);
             return;
         }
 
         if (!_commands.TryGoToLine(line))
-            _view.Message = $"No line {line} (buffer has {_buffer.LineCount})";
+            _view.SetMessage($"No line {line} (buffer has {_buffer.LineCount})", MessageKind.Error);
     }
 
     // nano-style line count: the trailing empty, unterminated line (from a file
@@ -438,7 +443,7 @@ internal sealed class Editor
     // A yes/no/cancel question on the message row. 'y'/'n' or null (Esc).
     private char? Confirm(string message)
     {
-        _view.Message = message;
+        _view.SetMessage(message, MessageKind.Prompt);
         try
         {
             while (true)

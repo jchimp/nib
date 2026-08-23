@@ -22,6 +22,14 @@ ticks phase 6's own "two weeks of daily use". Next: `%APPDATA%\nib\config.toml`,
 
 ## Progress Log
 
+### 2026-08-23 (message row styling)
+- The message row painted in `Color.Default` on `Color.Default` - identical to body text, which is why "Save modified buffer?" never caught the eye. It now has three tiers: info (pale on slate), error (pale on dark red), prompt (dark on amber, inverted against the other two on purpose - a row waiting on a keystroke should not look like a row reporting one).
+- The background hugs the text with one space either side rather than filling the row. A full-width band sits directly above the two teal help bars and reads as a third bar; hugging keeps it a notice. Nothing is painted at all when there is no message, so the colour appearing is itself the signal.
+- `Message` stays a plain string setter and resets the kind to Info on assignment. That is the interesting bit: the loop clears the row every batch, and without the reset a failure's red would outlive its text and paint the next success. `SetMessage(text, kind)` is the deliberate path.
+- The prompt caret has to clear the same pad, or it lands one cell left of its character. `MessagePad` is used by both `DrawMessage` and `PlaceCursor` so they cannot drift.
+- Found while doing it: the `^H` hint had grown to **137 characters** and was clipped at 80, so its second half - including the Alt+T and Alt+N it had just been given - was never visible. It restated the two help bars anyway. Rewritten as `HelpBar.Hint` to carry only what the rows have no room for (Shift+arrows, Ctrl+arrows, Esc, Alt+T, Alt+N), at 77 characters.
+- Tests: 212 green (was 201). New `MessageRowTests` (padding, three distinguishable styles, the Info reset, a prompt overriding the kind, caret offset, clipping) and `HelpBarTests`, which pins all three strings to 80 columns so the next key added fails a test instead of silently vanishing off the right edge.
+
 ### 2026-08-23 (line-number gutter)
 - `Alt+N` toggles a line-number gutter; `-l` / `--line-numbers` turns it on at startup. Default off, as nano's is. Alt rather than Ctrl for the same reason Alt+T is: every Ctrl chord is spoken for. Alt+N rather than nano's M-# because a mnemonic beats a symbol you have to reach for.
 - `EditorView` owns it: `GutterWidth` (digits in `LineCount`, plus a one-space separator) and `TextColumns` (`Width - GutterWidth`). Recomputed per frame rather than cached - a buffer crossing 999 to 1000 lines needs a wider gutter on the very next frame, and a stale width would paint digits over the first column of text.

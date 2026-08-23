@@ -5,6 +5,23 @@ using Nib.Terminal;
 namespace Nib.Ui;
 
 /// <summary>
+/// What the message row is saying, which decides how it is painted. The row
+/// carries all three and used to render them identically — a failed save looked
+/// exactly like a successful one.
+/// </summary>
+public enum MessageKind
+{
+    /// <summary>Something happened and went fine. "Wrote 42 lines".</summary>
+    Info,
+
+    /// <summary>Something failed. "Error: access denied".</summary>
+    Error,
+
+    /// <summary>Waiting on the user. A save-as prompt, or a Y/N/Esc question.</summary>
+    Prompt,
+}
+
+/// <summary>
 /// Paints the editable buffer through a <see cref="Viewport"/> onto a
 /// <see cref="Screen"/> in the nano layout: a title/status line on top, the text
 /// body, then a message/prompt line and a two-row shortcut bar at the bottom.
@@ -32,13 +49,50 @@ public sealed class EditorView
     // is dropped rather than squeezing the content it exists to index.
     private const int MinTextColumns = 20;
 
+    // Message row. Three tiers, because the row carries all three and painting them
+    // alike meant a failed save read exactly like a successful one. Kept clear of the
+    // bars' teal and of DefaultSelectionBg, so none of them can be mistaken for
+    // another when they share a screen.
+    private static readonly Color MessageInfoFg = Color.Rgb(0xDC, 0xE7, 0xF0);
+    private static readonly Color MessageInfoBg = Color.Rgb(0x2C, 0x3E, 0x50);
+    private static readonly Color MessageErrorFg = Color.Rgb(0xFF, 0xE5, 0xE5);
+    private static readonly Color MessageErrorBg = Color.Rgb(0x8B, 0x22, 0x22);
+    private static readonly Color MessagePromptFg = Color.Rgb(0x1A, 0x1A, 0x1A);
+    private static readonly Color MessagePromptBg = Color.Rgb(0xD7, 0xA2, 0x1A);
+
+    // One space of background either side of the text, so the run reads as a label
+    // rather than as body text that happens to be coloured. The caret has to clear
+    // the same pad, or it lands one cell left of the character it is on.
+    private const int MessagePad = 1;
+
     private readonly Screen _screen;
     private readonly Viewport _viewport;
     private readonly TextBuffer _buffer;
     private readonly Cursor _cursor;
 
-    /// <summary>Transient feedback shown on the message row when no prompt is active ("Wrote 42 lines").</summary>
-    public string Message { get; set; } = "";
+    private string _message = "";
+
+    /// <summary>
+    /// Transient feedback shown on the message row when no prompt is active
+    /// ("Wrote 42 lines"). Assigning resets the kind to <see cref="MessageKind.Info"/>
+    /// — deliberately, so a previous error's styling can never outlive its text and
+    /// paint the next success in red.
+    /// </summary>
+    public string Message
+    {
+        get => _message;
+        set { _message = value; MessageKind = MessageKind.Info; }
+    }
+
+    /// <summary>How <see cref="Message"/> is painted. Set it through <see cref="SetMessage"/>.</summary>
+    public MessageKind MessageKind { get; private set; }
+
+    /// <summary>Set the message text and its severity together.</summary>
+    public void SetMessage(string text, MessageKind kind)
+    {
+        _message = text;
+        MessageKind = kind;
+    }
 
     /// <summary>When set, the message row becomes this modal input line and the caret moves into it.</summary>
     public Prompt? ActivePrompt { get; set; }
@@ -221,14 +275,36 @@ public sealed class EditorView
         if (x0 >= 0) _screen.PutText(x0, y, label, GutterFg, Color.Default);
     }
 
+    // The message row is the only chrome that is blank most of the time, so it gets
+    // no background of its own until it has something to say — the colour appearing
+    // is itself the signal. The run hugs the text with one space either side rather
+    // than filling the row: a full-width band directly above the two help bars reads
+    // as a third bar and crowds the bottom of the screen.
     private void DrawMessage()
     {
         int y = MessageRow;
         if (y <= 0) return;
+
+        bool prompting = ActivePrompt is not null;
         string text = ActivePrompt is { } p ? p.Label + p.Input : Message;
-        if (text.Length > _screen.Width) text = text[.._screen.Width];
-        _screen.PutText(0, y, text, Color.Default, Color.Default);
+        if (text.Length == 0) return;
+
+        (Color fg, Color bg) = MessageColors(prompting ? MessageKind.Prompt : MessageKind);
+
+        string padded = new string(' ', MessagePad) + text + new string(' ', MessagePad);
+        if (padded.Length > _screen.Width) padded = padded[.._screen.Width];
+        _screen.PutText(0, y, padded, fg, bg);
     }
+
+    private static (Color Fg, Color Bg) MessageColors(MessageKind kind) => kind switch
+    {
+        MessageKind.Error => (MessageErrorFg, MessageErrorBg),
+        // Dark text on amber, inverted against the other two on purpose: a row that
+        // is waiting on a keystroke should not look like a row that is merely
+        // reporting one.
+        MessageKind.Prompt => (MessagePromptFg, MessagePromptBg),
+        _ => (MessageInfoFg, MessageInfoBg),
+    };
 
     private void DrawHelp()
     {
@@ -256,7 +332,8 @@ public sealed class EditorView
     {
         if (ActivePrompt is { } p)
         {
-            CursorX = Math.Min(_screen.Width - 1, p.Label.Length + p.Caret);
+            // + MessagePad: DrawMessage indents the prompt by its leading pad space.
+            CursorX = Math.Min(_screen.Width - 1, MessagePad + p.Label.Length + p.Caret);
             CursorY = Math.Max(0, MessageRow);
             return;
         }
