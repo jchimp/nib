@@ -211,6 +211,10 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
   `F3` and `Shift+F3` repeat forward and backward, so there is no mode to be on the
   wrong side of
 - ~~Go to line~~ — done in phase 6a: `^G`, and `+LINE file` on the command line
+- `^W` line / word / character count — not on this list originally, and it passes
+  the "would nano have this?" test: nano's is `M-D`. Counts the selection when there
+  is one. A one-shot banner rather than a persistent title-row corner, which is
+  O(buffer) against a row redrawn every frame
 - Mouse: click to position, drag to select, wheel to scroll ← next
 - ~~Help screen~~ — done in phase 6c, **ahead of this ordering**. It was deferred
   until search and mouse were both in so it would only be written once; search is
