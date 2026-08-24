@@ -270,4 +270,211 @@ public class EditorCommandsTests
 
         Assert.NotNull(clip.Text);
     }
+
+    // ---- search and replace -------------------------------------------------
+
+    private static SearchQuery Q(string text, bool matchCase = false, bool wholeWord = false)
+        => new(text, matchCase, wholeWord);
+
+    [Fact]
+    public void A_found_match_is_selected_so_the_view_paints_it()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("alpha beta", "gamma");
+
+        Assert.Equal(SearchOutcome.Found, cmd.Find(Q("beta"), backwards: false));
+
+        Assert.True(cmd.HasSelection);
+        Assert.Equal(new TextPosition(0, 6), cmd.Selection.Anchor);
+        Assert.Equal(0, cur.Row);
+        Assert.Equal(10, cur.Col); // caret on the far end, which is where F3 resumes
+    }
+
+    [Fact]
+    public void Find_again_walks_forward_one_match_at_a_time()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("beta", "beta", "beta");
+
+        cmd.Find(Q("beta"), backwards: false);
+        Assert.Equal(0, cur.Row);
+
+        Assert.Equal(SearchOutcome.Found, cmd.FindAgain(backwards: false));
+        Assert.Equal(1, cur.Row);
+
+        Assert.Equal(SearchOutcome.Found, cmd.FindAgain(backwards: false));
+        Assert.Equal(2, cur.Row);
+
+        // Off the bottom and round to the top, which is a different outcome so the
+        // message row can say it happened.
+        Assert.Equal(SearchOutcome.FoundWrapped, cmd.FindAgain(backwards: false));
+        Assert.Equal(0, cur.Row);
+    }
+
+    [Fact]
+    public void Searching_backwards_moves_off_the_match_it_is_standing_on()
+    {
+        // The caret sits past the current hit, so a naive backwards search finds that
+        // same hit again and Shift+F3 never moves. It has to start from the near end.
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("beta", "beta", "beta");
+
+        cmd.Find(Q("beta"), backwards: false);
+        Assert.Equal(0, cur.Row);
+
+        Assert.Equal(SearchOutcome.FoundWrapped, cmd.FindAgain(backwards: true));
+        Assert.Equal(2, cur.Row);
+
+        Assert.Equal(SearchOutcome.Found, cmd.FindAgain(backwards: true));
+        Assert.Equal(1, cur.Row);
+    }
+
+    /// <summary>
+    /// ROADMAP acceptance: search reports "not found" without losing the caret.
+    /// Jumping somewhere plausible instead is worse than not moving at all, because
+    /// the user's place in the file is gone and nothing says so.
+    /// </summary>
+    [Fact]
+    public void A_term_that_is_not_there_leaves_the_caret_exactly_where_it_was()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("alpha", "gamma", "delta");
+        cur.MoveTo(1, 3);
+
+        Assert.Equal(SearchOutcome.NotFound, cmd.Find(Q("beta"), backwards: false));
+
+        Assert.Equal(1, cur.Row);
+        Assert.Equal(3, cur.Col);
+        Assert.False(cmd.HasSelection);
+    }
+
+    [Fact]
+    public void Find_again_with_nothing_to_find_again_says_so()
+    {
+        // F3 before any ^F. A null check in Program.cs would be untestable; an
+        // outcome is not.
+        (EditorCommands cmd, _, _, _) = Setup("alpha");
+
+        Assert.Equal(SearchOutcome.NoQuery, cmd.FindAgain(backwards: false));
+        Assert.Equal(SearchOutcome.NoQuery, cmd.Find(Q(""), backwards: false));
+    }
+
+    [Fact]
+    public void The_term_and_its_toggles_survive_for_the_next_search()
+    {
+        (EditorCommands cmd, _, _, _) = Setup("Alpha alpha");
+
+        cmd.Find(Q("alpha", matchCase: true, wholeWord: true), backwards: false);
+
+        Assert.Equal("alpha", cmd.Search.Text);
+        Assert.True(cmd.Search.MatchCase);
+        Assert.True(cmd.Search.WholeWord);
+    }
+
+    [Fact]
+    public void Replacing_one_match_leaves_the_caret_past_what_it_inserted()
+    {
+        // Resuming from the match *start* would find the replacement inside itself,
+        // and "a" -> "aa" would never stop.
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("a b a");
+
+        cmd.Find(Q("a"), backwards: false);
+        cmd.ReplaceMatch(new SearchMatch(new TextPosition(0, 0), new TextPosition(0, 1)), "aa");
+
+        Assert.Equal("aa b a", buf.GetLine(0));
+        Assert.Equal(2, cur.Col);
+    }
+
+    [Fact]
+    public void Replace_all_rewrites_every_match_and_counts_them()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("beta one", "two", "three beta beta");
+
+        Assert.Equal(3, cmd.ReplaceAll(Q("beta"), "GAMMA"));
+
+        Assert.Equal("GAMMA one", buf.GetLine(0));
+        Assert.Equal("two", buf.GetLine(1));
+        Assert.Equal("three GAMMA GAMMA", buf.GetLine(2));
+    }
+
+    /// <summary>
+    /// ROADMAP acceptance: replace-all is a single undo step. The whole run is one
+    /// Edit spanning the first hit to the last, so this must come back byte-exact
+    /// after exactly one Undo - not after three.
+    /// </summary>
+    [Fact]
+    public void Replace_all_undoes_byte_exactly_in_one_step()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("beta one", "two", "three beta beta");
+        string before = buf.ToText();
+
+        cmd.ReplaceAll(Q("beta"), "GAMMA");
+        Assert.NotEqual(before, buf.ToText());
+
+        Assert.True(cmd.Undo());
+        Assert.Equal(before, buf.ToText());
+        Assert.False(cmd.Undo()); // and there was only ever the one step to take
+    }
+
+    [Fact]
+    public void Replace_all_terminates_when_the_replacement_contains_the_term()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("a a a");
+
+        Assert.Equal(3, cmd.ReplaceAll(Q("a"), "aa"));
+        Assert.Equal("aa aa aa", buf.GetLine(0));
+    }
+
+    [Fact]
+    public void Replace_all_survives_a_replacement_that_spans_lines()
+    {
+        // The span rewrite goes back through InsertMultiline, so a newline in the
+        // replacement has to split lines properly rather than land as a literal.
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("one X two", "three X four");
+        string before = buf.ToText();
+
+        Assert.Equal(2, cmd.ReplaceAll(Q("X"), "\nY\n"));
+
+        Assert.Equal(6, buf.LineCount);
+        Assert.True(cmd.Undo());
+        Assert.Equal(before, buf.ToText());
+    }
+
+    [Fact]
+    public void Replace_all_can_start_part_way_down_the_file()
+    {
+        // What the "A" answer in confirm-each does with the rest of the file.
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("beta", "beta", "beta");
+
+        Assert.Equal(2, cmd.ReplaceAll(Q("beta"), "GAMMA", new TextPosition(1, 0)));
+
+        Assert.Equal("beta", buf.GetLine(0));
+        Assert.Equal("GAMMA", buf.GetLine(1));
+        Assert.Equal("GAMMA", buf.GetLine(2));
+    }
+
+    [Fact]
+    public void Replace_all_with_no_matches_changes_nothing()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("alpha", "gamma");
+        string before = buf.ToText();
+
+        Assert.Equal(0, cmd.ReplaceAll(Q("beta"), "X"));
+
+        Assert.Equal(before, buf.ToText());
+        Assert.False(cmd.Undo()); // and did not record an empty step to undo
+    }
+
+    [Fact]
+    public void Skipping_a_match_does_not_offer_it_again()
+    {
+        // The skip path in confirm-each: the caret is already past the hit, so
+        // dropping the highlight is all it takes for the next search to move on.
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("beta beta");
+
+        cmd.Find(Q("beta"), backwards: false);
+        Assert.Equal(new TextPosition(0, 0), cmd.Selection.Anchor);
+        Assert.Equal(4, cur.Col);
+        cmd.ClearSelection();
+
+        Assert.Equal(SearchOutcome.Found, cmd.FindAgain(backwards: false));
+        Assert.Equal(new TextPosition(0, 5), cmd.Selection.Anchor);
+        Assert.Equal(9, cur.Col);
+    }
 }
