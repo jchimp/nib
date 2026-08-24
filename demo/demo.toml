@@ -1,0 +1,49 @@
+# hedgerow.toml - build and deployment settings for the field notes archive.
+
+title = "Field Notes"
+base_url = "https://notes.example.org"
+languages = ["en-GB", "cy"]
+draft = false
+build_timeout = 30_000
+
+[author]
+name = "R. Aldworth"
+email = "notes@example.org"
+mastodon = "@aldworth@botsin.space"
+
+[build]
+out_dir = "dist"
+clean = true
+minify = true
+targets = ["es2022", "chrome120"]
+# Inline anything smaller than this rather than emitting a request for it.
+inline_below_bytes = 4096
+
+[build.images]
+formats = ["avif", "webp"]
+widths = [480, 960, 1920]
+quality = 82
+
+[server]
+host = "127.0.0.1"
+port = 4173
+open_browser = false
+watch = ["content/", "layouts/", "static/"]
+
+[deploy]
+provider = "s3"
+bucket = "field-notes-static"
+region = "eu-west-2"
+invalidate = ["/index.html", "/feed.xml"]
+
+[[deploy.headers]]
+match = "*.html"
+cache_control = "public, max-age=300"
+
+[[deploy.headers]]
+match = "assets/*"
+cache_control = "public, max-age=31536000, immutable"
+
+[metadata]
+last_published = 2026-08-19T14:32:00Z
+revision = 214
