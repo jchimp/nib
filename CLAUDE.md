@@ -43,7 +43,7 @@ src/Nib/
   Terminal/      NativeMethods, ConsoleHost, TerminalWriter, InputReader,
                  InputEvents, Clipboard, Screen (phase 2)
   Model/         TextBuffer, Line, Cursor, Selection, Undo/, FileIo   (phase 3)
-                 Config (phase 6b), TextSearch, SearchState           (phase 6c)
+                 Config (phase 6b), TextSearch, SearchState, TextStats (phase 6c)
   Highlight/     IHighlighter, TextMateHighlighter, GrammarStore,
                  GrammarManifest, ThemeMap, LanguageDetector,
                  RawGrammarFixup, StateEquivalence, Soak            (phase 5)
@@ -465,6 +465,19 @@ Direction is keys (`F3` / `Shift+F3`), not a toggle. `InputReader` casts
 `wVirtualKeyCode` straight to `ConsoleKey`, so VK_F3 arrives as `ConsoleKey.F3` with
 a zero `UnicodeChar` — it displaced nothing and types nothing.
 
+**`^W` counts, and its word rule disagrees with search's on purpose.**
+`Model/TextStats.cs` calls a word a run of non-whitespace — `wc -w`'s rule, nano's,
+and the one `Cursor.WordLeft`/`WordRight` use for `^arrow` movement. Whole-word
+*search* counts letters, digits and underscore instead, so `foo,bar` is one word to
+move through and two to match. Both are right for what they do; don't "unify" them.
+
+Chars counts line terminators (a CRLF line costs two) because they are characters the
+file holds. It is a character count, not a byte count.
+
+`TextStats.LineCount` is the one definition of the nano-style "a trailing empty
+unterminated line isn't a line" rule, shared by `^W` and by the "Wrote N lines"
+message. Two counts of the same buffer that differ by one make both untrustworthy.
+
 **`HelpBar.Hint` is gone; `^H` opens `Ui/HelpScreen`.** The hint could not hold the
 keymap once `^F` and `^R` existed — the rows were at 72 and 74 columns and the hint at
 77, against 80. `HelpScreenTests` pins every line against 80 columns *and* the whole
@@ -491,8 +504,9 @@ without complaint. The screen wants one more pass once mouse keys exist.
   on a real console; the foundation is cleared for phase 2.
 - **Phases 2–5 implemented and unit-tested.** Phase 5 landed 2026-07-27; daily use
   since has discharged most of the interactive acceptance for phases 3–5.
-- **Phase 6 in progress (305 tests).** 6a (keymap/startup papercuts, TypeScript),
-  6b (config.toml) and 6c (search, replace, `^H` help screen) all landed 2026-08-23;
+- **Phase 6 in progress (327 tests).** 6a (keymap/startup papercuts, TypeScript),
+  6b (config.toml) and 6c (search, replace, `^H` help screen, `^W` counts) all
+  landed 2026-08-23;
   all three want a hardware pass. Next is mouse. See `ROADMAP.md` (note: at the repo
   root, not `docs/`) and `docs/PROGRESS.md`.
 
