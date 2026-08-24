@@ -8,7 +8,12 @@ namespace Nib.Ui;
 /// </summary>
 public sealed class Prompt
 {
-    public string Label { get; }
+    /// <summary>
+    /// Settable, because the search prompt rewrites it mid-entry: Alt+C and Alt+W
+    /// toggle case and whole-word while you are typing the term, and the badges in
+    /// the label are the only place that state is visible.
+    /// </summary>
+    public string Label { get; set; }
     public string Input { get; private set; }
     public int Caret { get; private set; }
 
