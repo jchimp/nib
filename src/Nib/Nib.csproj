@@ -12,7 +12,7 @@
     <!-- One source of truth for the version flag, the release zip name and the
          VERSION.txt inside it. scripts/release.ps1 reads this value when no -Version
          is passed, so a release is whatever is committed here. -->
-    <Version>0.6.2</Version>
+    <Version>0.7.0</Version>
     <Product>Nib</Product>
     <Company>Jeremy Champion</Company>
     <Description>A nano-style console text editor for Windows.</Description>
