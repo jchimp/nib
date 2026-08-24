@@ -184,6 +184,36 @@ public sealed class EditorView
         PlaceCursor();
     }
 
+    /// <summary>
+    /// Paint a full-screen page — the ^H keymap — over the buffer: a title bar, the
+    /// lines, and a footer bar saying how to leave. Anything past the bottom of the
+    /// window is clipped rather than scrolled, which is why
+    /// <see cref="HelpScreen.Lines"/> is sized to fit a 24-row terminal.
+    ///
+    /// The caret is parked on the footer. There is nothing to type into, and a caret
+    /// blinking in the middle of a page of text reads as an edit position.
+    /// </summary>
+    public void RenderOverlay(string title, IReadOnlyList<string> lines, string footer)
+    {
+        _screen.Clear(Cell.Blank);
+
+        DrawBar(0, title);
+
+        int last = _screen.Height - 1;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            int y = i + 1;
+            if (y >= last) break;
+            string text = lines[i];
+            if (text.Length > _screen.Width) text = text[.._screen.Width];
+            _screen.PutText(0, y, text, Color.Default, Color.Default);
+        }
+
+        DrawBar(last, footer);
+        CursorX = 0;
+        CursorY = Math.Max(0, last);
+    }
+
     private void DrawTitle()
     {
         FillBar(0);
@@ -315,6 +345,11 @@ public sealed class EditorView
     private void DrawHelpRow(int y, string text)
     {
         if (y <= 0) return;
+        DrawBar(y, text);
+    }
+
+    private void DrawBar(int y, string text)
+    {
         FillBar(y);
         if (text.Length > _screen.Width) text = text[.._screen.Width];
         _screen.PutText(0, y, text, BarFg, BarBg);
