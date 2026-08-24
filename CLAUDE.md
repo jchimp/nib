@@ -43,10 +43,12 @@ src/Nib/
   Terminal/      NativeMethods, ConsoleHost, TerminalWriter, InputReader,
                  InputEvents, Clipboard, Screen (phase 2)
   Model/         TextBuffer, Line, Cursor, Selection, Undo/, FileIo   (phase 3)
+                 Config (phase 6b), TextSearch, SearchState           (phase 6c)
   Highlight/     IHighlighter, TextMateHighlighter, GrammarStore,
                  GrammarManifest, ThemeMap, LanguageDetector,
                  RawGrammarFixup, StateEquivalence, Soak            (phase 5)
   Ui/            EditorView, StatusBar, HelpBar, Prompt               (phase 3+)
+                 HelpScreen                                           (phase 6c)
   Commands/      Keymap, Commands                                     (phase 3+)
   Resources/     Grammars/*.json.gz, Themes/*.json.gz  (generated, committed)
 grammars/manifest.json
@@ -422,6 +424,53 @@ divides by zero in `TabStops.NextTabStop`. An unknown theme resolves to null in
 
 Nib never writes this file. There is no `--write-config` and no directory creation.
 
+## Search and replace (phase 6c)
+
+`Model/TextSearch.cs` is console-free like the rest of `Model/`, so the scan and all
+the wrap arithmetic are testable with nothing but the BCL. Matches never span a line
+break — this is a config editor, nano is line-based for the same reason, and it keeps
+the scan a plain `IndexOf` per row.
+
+**Replace-all is one undo step without a compound-edit type.** `Edit` is already "at
+`Start`, `Removed` became `Inserted`", so the whole run is a *single* Edit spanning
+the first hit to the last, with the replacements baked into the inserted text: one
+`ApplyReplace`, one `LinesChanged`, one `^Z`. The new span is stitched out of
+`GetRange` calls over the gaps between matches, which is what keeps per-line endings
+intact through a multi-line replacement.
+
+The cost is that the undo entry holds that span twice over — on a file where the
+first and last hits bracket everything, that is the file twice. At a few MB that is
+cheaper than a second kind of undo record. Do not "fix" it by adding an edit-group
+stack; undo is the one part of this codebase that does not want more moving parts.
+
+Confirm-each is deliberately one step **per** hit. It is a per-hit gesture, and
+per-hit undo is what matches it.
+
+**Always resume scanning from the end of the *inserted* text, never from the match
+start.** Otherwise replacing `a` with `aa` finds the replacement inside itself and
+never terminates. Applies to `ReplaceMatch`'s caret placement and to `FindAll`'s
+advance, and it looks fine under every test term that is not a substring of its own
+replacement.
+
+**Backwards search has to start from the near end of the selection.** After a hit the
+caret sits on the far end, so searching backwards from the caret finds the same match
+again and `Shift+F3` never moves. Forward needs no such handling — the caret being
+past the match is exactly what makes `F3` walk.
+
+Whole-word is `IsLetterOrDigit || '_'`, deliberately **not** the whitespace-delimited
+words `Cursor.WordLeft`/`WordRight` use for `^arrow` movement: under that rule `foo,`
+is one word and a whole-word search for `foo` would refuse to match it.
+
+Direction is keys (`F3` / `Shift+F3`), not a toggle. `InputReader` casts
+`wVirtualKeyCode` straight to `ConsoleKey`, so VK_F3 arrives as `ConsoleKey.F3` with
+a zero `UnicodeChar` — it displaced nothing and types nothing.
+
+**`HelpBar.Hint` is gone; `^H` opens `Ui/HelpScreen`.** The hint could not hold the
+keymap once `^F` and `^R` existed — the rows were at 72 and 74 columns and the hint at
+77, against 80. `HelpScreenTests` pins every line against 80 columns *and* the whole
+page against a 24-row window, because `RenderOverlay` clips in both directions
+without complaint. The screen wants one more pass once mouse keys exist.
+
 ## Coding conventions
 
 - File-scoped namespaces, nullable enabled, `TreatWarningsAsErrors`.
@@ -442,10 +491,10 @@ Nib never writes this file. There is no `--write-config` and no directory creati
   on a real console; the foundation is cleared for phase 2.
 - **Phases 2–5 implemented and unit-tested.** Phase 5 landed 2026-07-27; daily use
   since has discharged most of the interactive acceptance for phases 3–5.
-- **Phase 6 in progress (249 tests).** 6a (keymap/startup papercuts, TypeScript) and
-  6b (config.toml) landed 2026-08-23; both want a hardware pass. Next is search and
-  replace. See `ROADMAP.md` (note: at the repo root, not `docs/`) and
-  `docs/PROGRESS.md`.
+- **Phase 6 in progress (305 tests).** 6a (keymap/startup papercuts, TypeScript),
+  6b (config.toml) and 6c (search, replace, `^H` help screen) all landed 2026-08-23;
+  all three want a hardware pass. Next is mouse. See `ROADMAP.md` (note: at the repo
+  root, not `docs/`) and `docs/PROGRESS.md`.
 
 ### Corrections carried forward
 
