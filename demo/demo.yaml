@@ -1,0 +1,58 @@
+# docker-compose.yml - the field notes stack, local development profile.
+---
+name: hedgerow
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  web:
+    <<: *defaults
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./ops/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    <<: *defaults
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+      args:
+        NODE_VERSION: "20.11"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://hedgerow:hedgerow@db:5432/notes
+      LOG_LEVEL: debug
+      FEATURE_FLAGS: "search,drafts"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # Anchors, block scalars and flow sequences all in one file, because
+    # YAML is what this editor mostly gets pointed at.
+    command: >
+      node server.mjs
+      --port 3000
+      --verbose
+
+  db:
+    <<: *defaults
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: hedgerow, POSTGRES_DB: notes }
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata: {}
