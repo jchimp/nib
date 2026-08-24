@@ -209,6 +209,21 @@ public sealed class EditorCommands
         return TextStats.Of(_buffer.GetRange(start, end));
     }
 
+    /// <summary>
+    /// The live selection as a replace bound, or null when there is none. Like
+    /// <see cref="CountSelection"/> this exists so the coordinates leave the class
+    /// already clamped — nothing outside it gets to index the buffer with a raw anchor.
+    ///
+    /// ^R has to call this <b>before</b> its first search: a hit calls
+    /// <see cref="SelectRange"/> and overwrites the very selection being asked about.
+    /// </summary>
+    public ReplaceScope? CurrentSelection()
+    {
+        if (!HasSelection) return null;
+        (TextPosition start, TextPosition end) = SelectionRange();
+        return new ReplaceScope(start, end);
+    }
+
     // ---- search / replace ---------------------------------------------------
 
     /// <summary>The remembered term and toggles, for the prompt to pre-fill and F3 to repeat.</summary>
@@ -268,9 +283,12 @@ public sealed class EditorCommands
     }
 
     /// <summary>
-    /// Replace every match at or after <paramref name="from"/> as a <b>single</b>
-    /// undo step, and return how many. Returns 0 and touches nothing when the term
-    /// does not occur.
+    /// Replace every match at or after <paramref name="from"/>, and ending at or
+    /// before <paramref name="to"/>, as a <b>single</b> undo step, and return how
+    /// many. Returns 0 and touches nothing when the term does not occur.
+    ///
+    /// <paramref name="to"/> is how answering A to a replace-in-selection stays inside
+    /// the selection.
     ///
     /// The single step needs no compound-edit machinery, because <see cref="Edit"/>
     /// is already "at Start, Removed became Inserted": the whole run is one edit
@@ -280,9 +298,10 @@ public sealed class EditorCommands
     /// twice. At this editor's few-MB target that is cheaper than a second kind of
     /// undo record, and undo is not where this project wants more moving parts.
     /// </summary>
-    public int ReplaceAll(SearchQuery query, string replacement, TextPosition? from = null)
+    public int ReplaceAll(SearchQuery query, string replacement,
+                         TextPosition? from = null, TextPosition? to = null)
     {
-        List<SearchMatch> matches = TextSearch.FindAll(_buffer, query, from);
+        List<SearchMatch> matches = TextSearch.FindAll(_buffer, query, from, to);
         if (matches.Count == 0) return 0;
 
         TextPosition spanStart = matches[0].Start;

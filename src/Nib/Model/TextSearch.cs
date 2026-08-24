@@ -92,17 +92,32 @@ public static class TextSearch
     }
 
     /// <summary>
-    /// Every match in the buffer, in order, at or after <paramref name="from"/>.
-    /// Matches never overlap: the scan resumes past each hit.
+    /// Every match in the buffer, in order, at or after <paramref name="from"/> and
+    /// ending at or before <paramref name="to"/>. Matches never overlap: the scan
+    /// resumes past each hit.
+    ///
+    /// <paramref name="to"/> is what makes replace-in-selection possible: a match that
+    /// straddles the bound is outside it, because replacing it would rewrite text the
+    /// user did not select.
     /// </summary>
-    public static List<SearchMatch> FindAll(TextBuffer buffer, SearchQuery query, TextPosition? from = null)
+    public static List<SearchMatch> FindAll(TextBuffer buffer, SearchQuery query,
+                                            TextPosition? from = null, TextPosition? to = null)
     {
         var found = new List<SearchMatch>();
         if (query.Text.Length == 0) return found;
 
         (int startRow, int startCol) = from is { } p ? Anchor(buffer, p) : (0, 0);
 
-        for (int row = startRow; row < buffer.LineCount; row++)
+        int lastRow = buffer.LineCount - 1;
+        TextPosition? limit = null;
+        if (to is { } t)
+        {
+            (int row, int col) = Anchor(buffer, t);
+            limit = new TextPosition(row, col);
+            lastRow = row;
+        }
+
+        for (int row = startRow; row <= lastRow; row++)
         {
             string line = buffer.GetLine(row);
             int i = row == startRow ? startCol : 0;
@@ -110,7 +125,11 @@ public static class TextSearch
             {
                 int hit = IndexIn(line, i, query);
                 if (hit < 0) break;
-                found.Add(At(row, hit, query));
+
+                SearchMatch match = At(row, hit, query);
+                if (limit is { } end && match.End > end) return found; // ordered: nothing later fits either
+
+                found.Add(match);
                 i = hit + query.Text.Length;
             }
         }

@@ -200,7 +200,9 @@ internal static class Program
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
         Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
         Console.WriteLine("      Ctrl+G go to line; Ctrl+H full keymap;");
-        Console.WriteLine("      Ctrl+F find, F3 / Shift+F3 next / previous, Ctrl+R replace;");
+        Console.WriteLine("      Ctrl+F find (Enter for the next match, Esc to finish),");
+        Console.WriteLine("      F3 / Shift+F3 next / previous, Ctrl+R replace;");
+        Console.WriteLine("      Ctrl+R with a selection replaces only inside it;");
         Console.WriteLine("      Alt+C case, Alt+W whole word, both inside the search prompt;");
         Console.WriteLine("      Ctrl+W line / word / character count, for the selection or the file;");
         Console.WriteLine("      Alt+T cycle theme; Alt+N toggle line numbers.");
@@ -467,12 +469,49 @@ internal sealed class Editor
 
     // ---- search and replace -------------------------------------------------
 
-    // Ctrl+F. The term and the toggles are remembered, so the prompt opens pre-filled
-    // with the last search and F3 can repeat it without one.
+    // Ctrl+F. A mode, not a one-shot: the prompt stays up and every Enter advances to
+    // the next match, wrapping round the file. Esc leaves it, and leaves the caret on
+    // the match reached — so the common "find it, then edit it" is Esc and type,
+    // rather than Esc and navigate back to where the search had already put you.
+    //
+    // The term and the toggles are remembered, so the prompt opens pre-filled and F3
+    // repeats the walk from outside the prompt.
     private void DoFind()
     {
-        if (PromptForQuery("Search") is not { } query) return;
-        Report(_commands.Find(query, backwards: false), query.Text);
+        SearchState state = _commands.Search;
+
+        // The query as last submitted. Comparing the whole SearchQuery — a record
+        // struct — is what makes Alt+C mid-walk restart the search under the new rules
+        // instead of advancing under the old ones: the toggles are part of the value,
+        // so an edited term and a flipped toggle are the same case and need no separate
+        // bookkeeping.
+        SearchQuery? submitted = null;
+        string status = "";
+        MessageKind kind = MessageKind.Info;
+
+        RunSearchPrompt("Search", prompt =>
+        {
+            if (prompt.Input.Length == 0)
+            {
+                status = "";
+                prompt.SetStatus("");
+                return true;
+            }
+
+            var query = new SearchQuery(prompt.Input, state.MatchCase, state.WholeWord);
+            SearchOutcome outcome = query == submitted
+                ? _commands.FindAgain(backwards: false)
+                : _commands.Find(query, backwards: false);
+            submitted = query;
+
+            (status, kind) = Describe(outcome, query.Text);
+            prompt.SetStatus(status, kind);
+            return true; // stay open
+        });
+
+        // Carry the last thing the prompt said onto the message row, so Esc-ing out of
+        // a failed search still leaves the reason on screen.
+        _view.SetMessage(status, kind);
     }
 
     // F3 / Shift+F3. No prompt at all — direction is the key, not a mode, so there is
@@ -483,12 +522,19 @@ internal sealed class Editor
     // Ctrl+R. Walks the file offering each hit, and hands the rest to a single
     // undo-step ReplaceAll if the user answers A.
     //
-    // The pass starts at the top rather than at the caret. nano replaces from the
-    // cursor, but "Replaced 3" on a file containing 11 hits — because the other 8
-    // were above where you happened to be sitting — is a bug report waiting to
-    // happen, and starting at the top also gives the walk a natural end.
+    // With a selection live the pass is confined to it, which is the answer to "replace
+    // these three, not the ninety elsewhere in the file" — the only way to scope a
+    // replace without a regex. With nothing selected the pass starts at the top rather
+    // than at the caret. nano replaces from the cursor, but "Replaced 3" on a file
+    // containing 11 hits — because the other 8 were above where you happened to be
+    // sitting — is a bug report waiting to happen, and starting at the top also gives
+    // the walk a natural end.
     private void DoReplace()
     {
+        // Before any prompt, and before any search: a hit calls SelectRange, which
+        // overwrites the very selection this pass is supposed to be bounded by.
+        ReplaceScope? original = _commands.CurrentSelection();
+
         if (PromptForQuery("Replace") is not { } query) return;
 
         string? with = RunPrompt("Replace with: ", _commands.Search.Replacement);
@@ -502,7 +548,11 @@ internal sealed class Editor
         int homeRow = _commands.Cursor.Row;
         int homeCol = _commands.Cursor.Col;
 
-        _commands.Move(_commands.Cursor.DocumentStart, extend: false);
+        ReplaceScope? scope = original;
+        if (scope is { } start)
+            _commands.Move(() => _commands.Cursor.MoveTo(start.Start.Row, start.Start.Col), extend: false);
+        else
+            _commands.Move(_commands.Cursor.DocumentStart, extend: false);
 
         int replaced = 0;
         bool cancelled = false;
@@ -513,12 +563,16 @@ internal sealed class Editor
             if (_commands.FindAgain(backwards: false) != SearchOutcome.Found) break;
             if (_commands.LastMatch is not { } match) break;
 
+            // Past the selection, but still inside the file. Wrapping cannot catch this
+            // one — the scan has simply walked out the far end of the scope.
+            if (scope is { } bound && !bound.Contains(match)) break;
+
             ReplaceAnswer answer = ConfirmReplace();
             if (answer == ReplaceAnswer.Cancel) { cancelled = true; break; }
 
             if (answer == ReplaceAnswer.All)
             {
-                replaced += _commands.ReplaceAll(query, with, match.Start);
+                replaced += _commands.ReplaceAll(query, with, match.Start, scope?.End);
                 break;
             }
 
@@ -526,6 +580,11 @@ internal sealed class Editor
             {
                 _commands.ReplaceMatch(match, with);
                 replaced++;
+
+                // The scope's end moves with the text: a longer replacement pushes it
+                // right, a shorter one pulls it left. Skip the adjustment and a growing
+                // replacement walks the last match of a selection out of bounds.
+                scope = scope?.AfterReplacing(match, with.Length);
             }
             else
             {
@@ -538,23 +597,32 @@ internal sealed class Editor
 
         if (replaced == 0)
         {
-            _commands.Move(() => _commands.Cursor.MoveTo(homeRow, homeCol), extend: false);
+            // Nothing changed, so put the user back exactly as they were — including
+            // the selection, which a cancelled replace has no business eating.
+            if (original is { } restore)
+                _commands.SelectRange(restore.Start, restore.End);
+            else
+                _commands.Move(() => _commands.Cursor.MoveTo(homeRow, homeCol), extend: false);
+
             _view.SetMessage(cancelled ? "Cancelled" : $"Not found: {query.Text}",
                              cancelled ? MessageKind.Info : MessageKind.Error);
         }
         else
             _view.Message = $"Replaced {replaced} occurrence{(replaced == 1 ? "" : "s")}"
+                          + (original is null ? "" : " in selection")
                           + (cancelled ? " (cancelled)" : "");
     }
 
-    // The shared front half of ^F and ^R: a prompt carrying the case and whole-word
-    // toggles in its own label. Null on Esc or an empty term.
-    private SearchQuery? PromptForQuery(string verb)
+    // The prompt both ^F and ^R type their term into: it carries the case and
+    // whole-word toggles in its own label and lets Alt+C / Alt+W flip them mid-term.
+    // `onSubmit` is what separates the two — ^F stays open and searches on each Enter,
+    // ^R passes null and accepts, because a second prompt follows immediately.
+    private string? RunSearchPrompt(string verb, Func<Prompt, bool>? onSubmit)
     {
         SearchState state = _commands.Search;
         string Label() => $"{verb}{Badges(state)}: ";
 
-        string? entered = RunPrompt(Label(), state.Text, (ev, prompt) =>
+        return RunPrompt(Label(), state.Text, (ev, prompt) =>
         {
             if (!ev.Alt) return false;
             switch (ev.Key)
@@ -565,7 +633,14 @@ internal sealed class Editor
             }
             prompt.Label = Label(); // the badges are the only place this state shows
             return true;
-        });
+        }, onSubmit);
+    }
+
+    // The accept-on-Enter form, for ^R. Null on Esc or an empty term.
+    private SearchQuery? PromptForQuery(string verb)
+    {
+        SearchState state = _commands.Search;
+        string? entered = RunSearchPrompt(verb, onSubmit: null);
 
         if (string.IsNullOrEmpty(entered)) return null;
         return new SearchQuery(entered, state.MatchCase, state.WholeWord);
@@ -576,20 +651,22 @@ internal sealed class Editor
 
     // A found match needs no message: the highlight is the answer. The other three
     // outcomes do, and "not found" says so without the caret having moved.
+    //
+    // One mapping, two destinations — the message row for F3, the prompt's own status
+    // run for the ^F walk. They said different things about the same outcome while it
+    // was written out twice.
+    private static (string Text, MessageKind Kind) Describe(SearchOutcome outcome, string term) => outcome switch
+    {
+        SearchOutcome.FoundWrapped => ("Search wrapped", MessageKind.Info),
+        SearchOutcome.NotFound => ($"Not found: {term}", MessageKind.Error),
+        SearchOutcome.NoQuery => ("Nothing to search for — ^F first", MessageKind.Error),
+        _ => ("", MessageKind.Info),
+    };
+
     private void Report(SearchOutcome outcome, string term)
     {
-        switch (outcome)
-        {
-            case SearchOutcome.FoundWrapped:
-                _view.Message = "Search wrapped";
-                break;
-            case SearchOutcome.NotFound:
-                _view.SetMessage($"Not found: {term}", MessageKind.Error);
-                break;
-            case SearchOutcome.NoQuery:
-                _view.SetMessage("Nothing to search for — ^F first", MessageKind.Error);
-                break;
-        }
+        (string text, MessageKind kind) = Describe(outcome, term);
+        if (text.Length > 0) _view.SetMessage(text, kind);
     }
 
     // ^W. Reports the selection when there is one and the whole buffer when there is
@@ -638,8 +715,14 @@ internal sealed class Editor
     // consumed one. Without it the prompt swallows every chord (see the filter near
     // the bottom), which is right for Save-as and go-to-line and wrong for search,
     // where Alt+C and Alt+W have to toggle case and whole word mid-term.
+    // `onSubmit` gets Enter when it is supplied, and returns whether to stay open. That
+    // is what makes ^F a mode rather than a one-shot: the find prompt searches on every
+    // Enter and keeps the row, so walking a file is one key rather than Esc-then-F3.
+    // With it null Enter accepts as before, which is what Save-as, go-to-line and both
+    // halves of ^R still want.
     private string? RunPrompt(string label, string initial = "",
-                              Func<InputEvent, Prompt, bool>? onChord = null)
+                              Func<InputEvent, Prompt, bool>? onChord = null,
+                              Func<Prompt, bool>? onSubmit = null)
     {
         var prompt = new Prompt(label, initial);
         _view.ActivePrompt = prompt;
@@ -659,7 +742,9 @@ internal sealed class Editor
                     switch (ev.Key)
                     {
                         case ConsoleKey.Escape: return null;
-                        case ConsoleKey.Enter: return prompt.Input;
+                        case ConsoleKey.Enter:
+                            if (onSubmit is null || !onSubmit(prompt)) return prompt.Input;
+                            continue;
                         case ConsoleKey.Backspace: prompt.Backspace(); continue;
                         case ConsoleKey.Delete: prompt.Delete(); continue;
                         case ConsoleKey.LeftArrow: prompt.Left(); continue;

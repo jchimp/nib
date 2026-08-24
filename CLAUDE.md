@@ -465,6 +465,35 @@ Direction is keys (`F3` / `Shift+F3`), not a toggle. `InputReader` casts
 `wVirtualKeyCode` straight to `ConsoleKey`, so VK_F3 arrives as `ConsoleKey.F3` with
 a zero `UnicodeChar` — it displaced nothing and types nothing.
 
+**`^F` is a mode: the prompt stays open and every Enter advances.** `RunPrompt` grew an
+`onSubmit` hook that returns whether to stay open; passing null keeps the accept-on-Enter
+behaviour that Save-as, `^G` and both halves of `^R` still want. The walk compares the
+whole `SearchQuery` — a record struct — against the last submitted one, so an edited term
+and an `Alt+C` mid-walk are the same case: both restart the search rather than advancing
+under the old rules. Don't decompose that into separate term and toggle checks.
+
+**The status had to move onto `Prompt`, because `ActivePrompt` displaces `Message`.**
+`EditorView.DrawMessage` paints one or the other, never both, so with the find prompt up
+there was nowhere for "Search wrapped" to appear until it closed — by which time the
+answer is stale. `Prompt.Status` is painted as its own run in its own colour after the
+input (`DrawPrompt`), which is what lets "Not found" read as an error on a row that is
+otherwise the amber of a prompt still waiting. The caret is placed off
+`Label.Length + Caret`, so a run appended after the input cannot disturb it. `Describe`
+is the single outcome→text mapping shared by that status and by `Report`'s message row;
+they said different things about the same outcome while it was written out twice.
+
+**`^R` scopes to the selection, and `CurrentSelection()` must be called before the first
+search.** A hit calls `SelectRange`, which overwrites the very selection the pass is
+bounded by. `Model/ReplaceScope.cs` holds the bound and its arithmetic, console-free like
+the rest of `Model/` — the `Editor` methods around it are untestable, and this is the part
+with edge cases. Its whole design rests on **replacements never moving a row**: term and
+replacement both come from a one-line prompt and matches never span a line break, so
+`AfterReplacing` is a column adjustment on `End.Row` rather than a remap. That adjustment
+is load-bearing: skip it and a growing replacement walks the last match of a selection out
+of bounds, which looks like a replace that stopped one hit early rather than a bug. `A`
+inside a scope goes through `ReplaceAll`'s `to` bound, and a match straddling that bound is
+*outside* it — replacing it would rewrite text the user did not select.
+
 **`^W` counts, and its word rule disagrees with search's on purpose.**
 `Model/TextStats.cs` calls a word a run of non-whitespace — `wc -w`'s rule, nano's,
 and the one `Cursor.WordLeft`/`WordRight` use for `^arrow` movement. Whole-word
@@ -504,7 +533,7 @@ without complaint. The screen wants one more pass once mouse keys exist.
   on a real console; the foundation is cleared for phase 2.
 - **Phases 2–5 implemented and unit-tested.** Phase 5 landed 2026-07-27; daily use
   since has discharged most of the interactive acceptance for phases 3–5.
-- **Phase 6 in progress (327 tests).** 6a (keymap/startup papercuts, TypeScript),
+- **Phase 6 in progress (350 tests).** 6a (keymap/startup papercuts, TypeScript),
   6b (config.toml) and 6c (search, replace, `^H` help screen, `^W` counts) all
   landed 2026-08-23;
   all three want a hardware pass. Next is mouse. See `ROADMAP.md` (note: at the repo

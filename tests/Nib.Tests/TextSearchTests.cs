@@ -207,4 +207,61 @@ public class TextSearchTests
         Assert.NotNull(TextSearch.FindNext(buf, At(99, 99), Q("alpha"), out _));
         Assert.NotNull(TextSearch.FindPrevious(buf, At(-3, -3), Q("beta"), out _));
     }
+
+    // ---- the `to` bound, which is what scopes a replace to a selection ----------
+
+    [Fact]
+    public void FindAll_stops_at_the_to_bound()
+    {
+        TextBuffer buf = Buffer("beta one", "beta two", "beta three");
+
+        List<SearchMatch> hits = TextSearch.FindAll(buf, Q("beta"), from: null, to: At(1, 8));
+
+        Assert.Equal(2, hits.Count);
+        Assert.Equal(At(0, 0), hits[0].Start);
+        Assert.Equal(At(1, 0), hits[1].Start);
+    }
+
+    [Fact]
+    public void FindAll_excludes_a_match_straddling_the_to_bound()
+    {
+        // The bound falls in the middle of the second "beta". Replacing it would
+        // rewrite two characters the user did not select, so it is outside the scope.
+        TextBuffer buf = Buffer("beta and beta");
+
+        List<SearchMatch> hits = TextSearch.FindAll(buf, Q("beta"), from: null, to: At(0, 11));
+
+        Assert.Single(hits);
+        Assert.Equal(At(0, 0), hits[0].Start);
+    }
+
+    [Fact]
+    public void FindAll_honours_from_and_to_together()
+    {
+        TextBuffer buf = Buffer("beta one", "beta two", "beta three", "beta four");
+
+        List<SearchMatch> hits = TextSearch.FindAll(buf, Q("beta"), At(1, 0), At(2, 10));
+
+        Assert.Equal(2, hits.Count);
+        Assert.Equal(At(1, 0), hits[0].Start);
+        Assert.Equal(At(2, 0), hits[1].Start);
+    }
+
+    [Fact]
+    public void FindAll_with_to_before_from_finds_nothing()
+    {
+        // An empty scope is not an error — it is a selection that contains no whole
+        // match — and it must not be read as "unbounded".
+        TextBuffer buf = Buffer("beta one", "beta two");
+
+        Assert.Empty(TextSearch.FindAll(buf, Q("beta"), At(1, 0), At(0, 4)));
+    }
+
+    [Fact]
+    public void FindAll_without_a_to_bound_still_reaches_the_end_of_the_buffer()
+    {
+        TextBuffer buf = Buffer("beta one", "beta two", "beta three");
+
+        Assert.Equal(3, TextSearch.FindAll(buf, Q("beta")).Count);
+    }
 }

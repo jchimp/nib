@@ -519,4 +519,71 @@ public class EditorCommandsTests
         Assert.Equal(new TextPosition(0, 5), cmd.Selection.Anchor);
         Assert.Equal(9, cur.Col);
     }
+
+    // ---- replace scoped to a selection -----------------------------------------
+
+    [Fact]
+    public void Replace_all_bounded_by_to_leaves_later_matches_alone()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("beta one", "beta two", "beta three");
+
+        int count = cmd.ReplaceAll(Q("beta"), "X", from: null, to: new TextPosition(1, 8));
+
+        Assert.Equal(2, count);
+        Assert.Equal("X one\nX two\nbeta three", buf.ToText());
+    }
+
+    [Fact]
+    public void A_bounded_replace_all_is_still_one_undo_step()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("beta one", "beta two", "beta three");
+        string before = buf.ToText();
+
+        cmd.ReplaceAll(Q("beta"), "X", from: null, to: new TextPosition(1, 8));
+
+        Assert.True(cmd.Undo());
+        Assert.Equal(before, buf.ToText());
+        Assert.False(cmd.Undo());
+    }
+
+    [Fact]
+    public void Current_selection_is_null_when_nothing_is_selected()
+    {
+        (EditorCommands cmd, _, _, _) = Setup("alpha beta");
+
+        Assert.Null(cmd.CurrentSelection());
+    }
+
+    [Fact]
+    public void Current_selection_is_normalised_however_it_was_dragged()
+    {
+        // Dragged right-to-left: the anchor is the far end. ^R has to see a scope
+        // whose Start really is before its End, or Contains rejects every match.
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("alpha beta gamma");
+
+        cmd.Move(() => cur.MoveTo(0, 10), extend: false);
+        cmd.Move(() => cur.MoveTo(0, 6), extend: true);
+
+        ReplaceScope scope = cmd.CurrentSelection()!.Value;
+        Assert.Equal(new TextPosition(0, 6), scope.Start);
+        Assert.Equal(new TextPosition(0, 10), scope.End);
+    }
+
+    [Fact]
+    public void Current_selection_survives_being_read_before_a_search_moves_it()
+    {
+        // The ordering ^R depends on: a hit calls SelectRange and overwrites the
+        // selection, so the scope has to be captured first and stay valid after.
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("beta one beta two beta");
+
+        cmd.Move(() => cur.MoveTo(0, 0), extend: false);
+        cmd.Move(() => cur.MoveTo(0, 17), extend: true);
+        ReplaceScope scope = cmd.CurrentSelection()!.Value;
+
+        cmd.Find(Q("beta"), backwards: false);
+
+        Assert.Equal(new TextPosition(0, 0), scope.Start);
+        Assert.Equal(new TextPosition(0, 17), scope.End);
+        Assert.NotEqual(scope, cmd.CurrentSelection()!.Value); // the search did move it
+    }
 }
