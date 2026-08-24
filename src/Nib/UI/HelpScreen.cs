@@ -41,7 +41,7 @@ public static class HelpScreen
         "  ^Left / ^Right  A word at a time     ^G  Go to line",
         "  Shift with any movement key extends the selection; Esc clears it",
         "",
-        "Display",
-        "  Alt+T  Cycle colour theme       Alt+N  Line numbers",
+        "Display and counts",
+        "  Alt+T  Cycle theme       Alt+N  Line numbers       ^W  Word count",
     };
 }
