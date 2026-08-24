@@ -139,4 +139,82 @@ public class MessageRowTests
         // The row below it is a help bar and must be untouched.
         Assert.Equal('^', screen.CellAt(0, Height - 2).Ch);
     }
+
+    // ---- the find prompt's status run ------------------------------------------
+
+    [Fact]
+    public void A_prompt_status_paints_after_the_input()
+    {
+        // ^F stays open across matches, and ActivePrompt displaces Message while it is
+        // up — so without this run a search has nowhere to say "wrapped" until the
+        // prompt closes and the answer is stale.
+        (EditorView view, Screen screen) = Setup();
+        var prompt = new Prompt("Search: ", "beta");
+        prompt.SetStatus("Search wrapped");
+        view.ActivePrompt = prompt;
+        view.Render();
+
+        Assert.Equal(" Search: beta  Search wrapped ", RowText(screen, 30));
+    }
+
+    [Fact]
+    public void A_prompt_status_keeps_its_own_colour()
+    {
+        (EditorView view, Screen screen) = Setup();
+        var prompt = new Prompt("Search: ", "zzz");
+        prompt.SetStatus("Not found: zzz", MessageKind.Error);
+        view.ActivePrompt = prompt;
+        view.Render();
+
+        Color promptBg = screen.CellAt(1, MessageRow).Bg;              // inside the label
+        Color statusBg = screen.CellAt(" Search: zzz  ".Length, MessageRow).Bg; // inside the status
+
+        Assert.NotEqual(promptBg, statusBg); // an error must not read as a plain prompt
+    }
+
+    [Fact]
+    public void A_prompt_with_no_status_paints_exactly_as_before()
+    {
+        (EditorView view, Screen screen) = Setup();
+        view.ActivePrompt = new Prompt("Save as: ", "nib.conf");
+        view.Render();
+
+        Assert.Equal(" Save as: nib.conf ", RowText(screen, 19));
+        Assert.Equal(Cell.Blank.Bg, screen.CellAt(19, MessageRow).Bg); // and nothing past it
+    }
+
+    [Fact]
+    public void A_long_status_is_clipped_rather_than_overflowing_the_row()
+    {
+        (EditorView view, Screen screen) = Setup();
+        var prompt = new Prompt("Search: ", new string('x', 40));
+        prompt.SetStatus("Not found: " + new string('x', 40), MessageKind.Error);
+        view.ActivePrompt = prompt;
+        view.Render();
+
+        // The status is cut short of the last cell so the closing pad still fits: a run
+        // clipped flush to the edge reads as truncated even when it is not.
+        Cell last = screen.CellAt(Width - 1, MessageRow);
+        Assert.Equal(' ', last.Ch);
+        Assert.Equal(screen.CellAt(1, MessageRow).Bg, last.Bg); // the prompt's own colour, not the status's
+    }
+
+    [Fact]
+    public void The_caret_ignores_the_status_run()
+    {
+        // The status is appended after the input, so it must not shift the caret --
+        // which is placed off Label.Length + Caret.
+        (EditorView view, Screen screen) = Setup();
+        var prompt = new Prompt("Search: ", "beta");
+        view.Render();
+        view.ActivePrompt = prompt;
+        view.Render();
+        int before = view.CursorX;
+
+        prompt.SetStatus("Search wrapped");
+        view.Render();
+
+        Assert.Equal(before, view.CursorX);
+        Assert.Equal(1 + "Search: ".Length + "beta".Length, view.CursorX);
+    }
 }

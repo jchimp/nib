@@ -140,4 +140,42 @@ public class KeymapTests
         Send(Key(ConsoleKey.Escape), cmd);
         Assert.Equal("hello world", buf.GetLine(0));
     }
+
+    [Fact]
+    public void Ctrl_F_finds_and_Ctrl_R_replaces()
+    {
+        (EditorCommands cmd, _, _, _) = Setup();
+        Assert.Equal(EditorAction.Find, Send(Ctrl(ConsoleKey.F), cmd));
+        Assert.Equal(EditorAction.Replace, Send(Ctrl(ConsoleKey.R), cmd));
+    }
+
+    [Fact]
+    public void F3_repeats_the_search_and_Shift_F3_reverses_it()
+    {
+        // Direction is the key, not a mode: there is no toggle to be on the wrong
+        // side of, so the two must dispatch differently off the same key.
+        (EditorCommands cmd, _, _, _) = Setup();
+        Assert.Equal(EditorAction.FindNext, Send(Key(ConsoleKey.F3), cmd));
+        Assert.Equal(EditorAction.FindPrevious, Send(Key(ConsoleKey.F3, KeyModifiers.Shift), cmd));
+    }
+
+    [Fact]
+    public void Ctrl_W_asks_for_the_counts_and_does_not_type_a_w()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup();
+        Assert.Equal(EditorAction.Stats, Send(Ctrl(ConsoleKey.W), cmd));
+        Assert.Equal("hello world", buf.GetLine(0));
+    }
+
+    [Fact]
+    public void F3_does_not_type_anything()
+    {
+        // It reaches the keymap as ConsoleKey.F3 with a zero UnicodeChar, and until
+        // it was bound it fell through to the printable-text fallback. Nothing must
+        // land in the buffer now that it is caught.
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup();
+        Send(Key(ConsoleKey.F3), cmd);
+        Send(Key(ConsoleKey.F3, KeyModifiers.Shift), cmd);
+        Assert.Equal("hello world", buf.GetLine(0));
+    }
 }

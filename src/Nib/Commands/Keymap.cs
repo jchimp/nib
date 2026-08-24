@@ -16,6 +16,11 @@ public enum EditorAction
     GoToLine,
     CycleTheme,
     ToggleLineNumbers,
+    Find,
+    Replace,
+    FindNext,
+    FindPrevious,
+    Stats,
 }
 
 /// <summary>
@@ -56,6 +61,17 @@ public static class Keymap
                 case ConsoleKey.O: return EditorAction.Save;
 
                 case ConsoleKey.G: return EditorAction.GoToLine;
+
+                // ^F/^R are CUA, and both were free. Direction is deliberately not a
+                // toggle here — F3/Shift+F3 below carry it, so there is no mode to be
+                // in and no way to be surprised by which way the next search goes.
+                case ConsoleKey.F: return EditorAction.Find;
+                case ConsoleKey.R: return EditorAction.Replace;
+
+                // nano puts the word count on M-D. ^W was free and is the more
+                // guessable key for it, and search is on ^F here rather than on
+                // nano's ^W, so there is no habit to collide with.
+                case ConsoleKey.W: return EditorAction.Stats;
 
                 // Ctrl+H, not Backspace. InputReader keys off wVirtualKeyCode, so this
                 // is VK_H (0x48) and the Backspace key is VK_BACK (0x08) — two distinct
@@ -103,6 +119,14 @@ public static class Keymap
             case ConsoleKey.Backspace: cmd.Backspace(); return EditorAction.None;
             case ConsoleKey.Delete: cmd.Delete(); return EditorAction.None;
             case ConsoleKey.Tab: cmd.InsertChar('\t'); return EditorAction.None;
+
+            // Search again, without a prompt and without spending a Ctrl chord.
+            // InputReader casts wVirtualKeyCode straight to ConsoleKey, so VK_F3
+            // (0x72) arrives here as ConsoleKey.F3 carrying a zero UnicodeChar —
+            // which is why it fell through to the printable-text fallback below
+            // harmlessly until now, and why it types nothing when caught here.
+            case ConsoleKey.F3:
+                return ev.Shift ? EditorAction.FindPrevious : EditorAction.FindNext;
 
             // Esc collapses a selection. Until now only an unshifted move did, so a
             // selection the user wanted rid of without moving the caret had no key —

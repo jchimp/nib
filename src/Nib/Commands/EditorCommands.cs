@@ -1,7 +1,27 @@
+using System.Text;
 using Nib.Model;
 using Nib.Model.Undo;
 
 namespace Nib.Commands;
+
+/// <summary>
+/// How a search ended. The command layer reports the outcome and never formats a
+/// sentence about it — the message row's wording is the loop's business.
+/// </summary>
+public enum SearchOutcome
+{
+    /// <summary>Found ahead of (or behind) the caret without running off the end.</summary>
+    Found,
+
+    /// <summary>Found, but only after running off the end and starting again.</summary>
+    FoundWrapped,
+
+    /// <summary>The term does not occur. The caret has not moved.</summary>
+    NotFound,
+
+    /// <summary>Nothing to search for — F3 with no earlier ^F, or an empty term.</summary>
+    NoQuery,
+}
 
 /// <summary>
 /// The verbs the keymap invokes: each pairs a buffer mutation with the matching
@@ -157,6 +177,151 @@ public sealed class EditorCommands
         Cursor.DocumentStart();
         _selection.AnchorAt(Cursor);
         Cursor.DocumentEnd();
+    }
+
+    /// <summary>
+    /// Select [start, end) and leave the caret on its far end — the same gesture
+    /// <see cref="SelectAll"/> makes, aimed at an arbitrary span. This is all a
+    /// search hit needs to become visible: the view paints whatever
+    /// <see cref="Selection"/> holds, and the next frame scrolls to the caret.
+    /// </summary>
+    public void SelectRange(TextPosition start, TextPosition end)
+    {
+        _selection.Clear();
+        Cursor.MoveTo(start.Row, start.Col);
+        _selection.AnchorAt(Cursor);
+        Cursor.MoveTo(end.Row, end.Col);
+    }
+
+    /// <summary>
+    /// Lines, words and characters for the selection — what ^W reports when there is
+    /// one. Zeroes when there is not, so the caller checks
+    /// <see cref="HasSelection"/> rather than reading meaning into an empty count.
+    ///
+    /// It lives here rather than in the loop because the selection's coordinates go
+    /// through the clamping <see cref="SelectionRange"/>, and nothing outside this
+    /// class gets to index the buffer with a raw anchor.
+    /// </summary>
+    public TextStats CountSelection()
+    {
+        if (!HasSelection) return default;
+        (TextPosition start, TextPosition end) = SelectionRange();
+        return TextStats.Of(_buffer.GetRange(start, end));
+    }
+
+    /// <summary>
+    /// The live selection as a replace bound, or null when there is none. Like
+    /// <see cref="CountSelection"/> this exists so the coordinates leave the class
+    /// already clamped — nothing outside it gets to index the buffer with a raw anchor.
+    ///
+    /// ^R has to call this <b>before</b> its first search: a hit calls
+    /// <see cref="SelectRange"/> and overwrites the very selection being asked about.
+    /// </summary>
+    public ReplaceScope? CurrentSelection()
+    {
+        if (!HasSelection) return null;
+        (TextPosition start, TextPosition end) = SelectionRange();
+        return new ReplaceScope(start, end);
+    }
+
+    // ---- search / replace ---------------------------------------------------
+
+    /// <summary>The remembered term and toggles, for the prompt to pre-fill and F3 to repeat.</summary>
+    public SearchState Search { get; } = new();
+
+    /// <summary>The span the last successful search landed on, for replace to act upon.</summary>
+    public SearchMatch? LastMatch { get; private set; }
+
+    /// <summary>Search for a new term, remembering it for <see cref="FindAgain"/>.</summary>
+    public SearchOutcome Find(SearchQuery query, bool backwards)
+    {
+        if (query.Text.Length == 0) return SearchOutcome.NoQuery;
+        Search.Text = query.Text;
+        Search.MatchCase = query.MatchCase;
+        Search.WholeWord = query.WholeWord;
+        return Seek(query, backwards);
+    }
+
+    /// <summary>Repeat the last search (F3 / Shift+F3), with no prompt.</summary>
+    public SearchOutcome FindAgain(bool backwards)
+        => Search.HasQuery ? Seek(Search.Query, backwards) : SearchOutcome.NoQuery;
+
+    // Forward searches run from the caret, which after a hit sits on the far end of
+    // that hit — so repeating naturally steps to the next one. Backwards is the case
+    // that needs help: the caret is past the current match, so searching from it
+    // would find the very same match again and Shift+F3 would never move. Start from
+    // the near end of the selection instead.
+    private SearchOutcome Seek(SearchQuery query, bool backwards)
+    {
+        TextPosition from = Caret;
+        if (backwards && _selection.IsActive(Cursor)) from = SelectionRange().Start;
+
+        bool wrapped;
+        SearchMatch? hit = backwards
+            ? TextSearch.FindPrevious(_buffer, from, query, out wrapped)
+            : TextSearch.FindNext(_buffer, from, query, out wrapped);
+
+        // Nothing found leaves the caret exactly where it was — the whole point of
+        // reporting rather than jumping somewhere plausible.
+        if (hit is not { } match) return SearchOutcome.NotFound;
+
+        LastMatch = match;
+        SelectRange(match.Start, match.End);
+        return wrapped ? SearchOutcome.FoundWrapped : SearchOutcome.Found;
+    }
+
+    /// <summary>
+    /// Replace one match, as its own undo step. The caret lands past the inserted
+    /// text, which is where the next search must resume — resuming from the match
+    /// *start* would find the replacement inside itself and turn "a" → "aa" into a
+    /// loop that never ends.
+    /// </summary>
+    public void ReplaceMatch(SearchMatch match, string replacement)
+    {
+        LastMatch = null;
+        ApplyReplace(match.Start, match.End, replacement, coalesce: false);
+    }
+
+    /// <summary>
+    /// Replace every match at or after <paramref name="from"/>, and ending at or
+    /// before <paramref name="to"/>, as a <b>single</b> undo step, and return how
+    /// many. Returns 0 and touches nothing when the term does not occur.
+    ///
+    /// <paramref name="to"/> is how answering A to a replace-in-selection stays inside
+    /// the selection.
+    ///
+    /// The single step needs no compound-edit machinery, because <see cref="Edit"/>
+    /// is already "at Start, Removed became Inserted": the whole run is one edit
+    /// spanning the first hit to the last, with the replacements baked into the
+    /// inserted text. The cost is that the undo entry holds that span twice over —
+    /// on a file where the first and last hits bracket everything, that is the file
+    /// twice. At this editor's few-MB target that is cheaper than a second kind of
+    /// undo record, and undo is not where this project wants more moving parts.
+    /// </summary>
+    public int ReplaceAll(SearchQuery query, string replacement,
+                         TextPosition? from = null, TextPosition? to = null)
+    {
+        List<SearchMatch> matches = TextSearch.FindAll(_buffer, query, from, to);
+        if (matches.Count == 0) return 0;
+
+        TextPosition spanStart = matches[0].Start;
+        TextPosition spanEnd = matches[^1].End;
+
+        // Stitch the new span out of the gaps between matches. GetRange is what
+        // reconstructs the real per-line terminators, so a multi-line span survives
+        // this byte-for-byte and mixed endings stay mixed.
+        var rewritten = new StringBuilder();
+        TextPosition at = spanStart;
+        foreach (SearchMatch match in matches)
+        {
+            rewritten.Append(_buffer.GetRange(at, match.Start));
+            rewritten.Append(replacement);
+            at = match.End;
+        }
+
+        LastMatch = null;
+        ApplyReplace(spanStart, spanEnd, rewritten.ToString(), coalesce: false);
+        return matches.Count;
     }
 
     // ---- clipboard ----------------------------------------------------------

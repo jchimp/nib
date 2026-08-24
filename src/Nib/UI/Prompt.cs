@@ -8,9 +8,31 @@ namespace Nib.Ui;
 /// </summary>
 public sealed class Prompt
 {
-    public string Label { get; }
+    /// <summary>
+    /// Settable, because the search prompt rewrites it mid-entry: Alt+C and Alt+W
+    /// toggle case and whole-word while you are typing the term, and the badges in
+    /// the label are the only place that state is visible.
+    /// </summary>
+    public string Label { get; set; }
     public string Input { get; private set; }
     public int Caret { get; private set; }
+
+    /// <summary>
+    /// A short report painted after the input, in its own colour: "wrapped",
+    /// "Not found: foo". The find prompt stays open across matches, and
+    /// <see cref="EditorView.ActivePrompt"/> displaces <see cref="EditorView.Message"/>
+    /// while it is up — so without this there is nowhere for a search to say what
+    /// happened until the prompt closes, by which time the answer is stale.
+    /// </summary>
+    public string Status { get; private set; } = "";
+
+    public MessageKind StatusKind { get; private set; } = MessageKind.Info;
+
+    public void SetStatus(string text, MessageKind kind = MessageKind.Info)
+    {
+        Status = text;
+        StatusKind = kind;
+    }
 
     public Prompt(string label, string initial = "")
     {

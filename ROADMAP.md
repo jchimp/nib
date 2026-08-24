@@ -205,12 +205,23 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 
 **Build**
 
-- Search, search-again, replace with confirm-each, case and whole-word toggles ← next
+- ~~Search, search-again, replace with confirm-each, case and whole-word toggles~~ —
+  done in phase 6c. `^F` finds, `^R` replaces confirming each, `Alt+C`/`Alt+W`
+  toggle case and whole word from inside the prompt. **Direction is not a toggle:**
+  `F3` and `Shift+F3` repeat forward and backward, so there is no mode to be on the
+  wrong side of
 - ~~Go to line~~ — done in phase 6a: `^G`, and `+LINE file` on the command line
-- Mouse: click to position, drag to select, wheel to scroll
-- Help screen — still the one-line hint, now on `^H`. The full screen is
-  deferred until search and mouse are in, so it documents a finished keymap
-  rather than being rewritten twice
+- `^W` line / word / character count — not on this list originally, and it passes
+  the "would nano have this?" test: nano's is `M-D`. Counts the selection when there
+  is one. A one-shot banner rather than a persistent title-row corner, which is
+  O(buffer) against a row redrawn every frame
+- Mouse: click to position, drag to select, wheel to scroll ← next
+- ~~Help screen~~ — done in phase 6c, **ahead of this ordering**. It was deferred
+  until search and mouse were both in so it would only be written once; search is
+  the point where the one-line hint provably stopped fitting, since both help rows
+  and the hint were within a few characters of 80 columns and `^F` plus `^R` fit on
+  none of the three. `HelpBar.Hint` is gone, `^H` opens `Ui/HelpScreen`, and it
+  wants one more pass after mouse
 - ~~`%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off~~ — done in phase
   6b, with `line_numbers` as a fourth key. `--tab-width`, `--mouse`/`--no-mouse` and
   `--no-config` came with it so every key has a flag that beats it. `mouse = false`
@@ -224,8 +235,13 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 
 **Acceptance**
 
-- [ ] Search wraps and reports "not found" without losing cursor position
-- [ ] Replace-all on a 10k-line file is a single undo step
+- [x] Search wraps and reports "not found" without losing cursor position
+      (`TextSearchTests` for the wrap in both directions, `EditorCommandsTests` for
+      the caret surviving a miss)
+- [x] Replace-all on a 10k-line file is a single undo step — one `Edit` spanning
+      the first hit to the last, so it needed no compound-edit machinery
+      (`EditorCommandsTests.Replace_all_undoes_byte_exactly_in_one_step`).
+      Confirm-each is deliberately one step *per* hit, matching the per-hit gesture
 - [ ] Mouse selection matches keyboard selection semantics exactly
 - [x] Two weeks of daily use with no data loss and no console corruption — in
       daily use at home and work on config and code files since the phase-5 build,

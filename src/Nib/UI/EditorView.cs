@@ -65,6 +65,10 @@ public sealed class EditorView
     // the same pad, or it lands one cell left of the character it is on.
     private const int MessagePad = 1;
 
+    // Between the typed term and the search status. Wider than MessagePad so the two
+    // colour runs read as separate things rather than as one wrapped sentence.
+    private const int StatusGap = 2;
+
     private readonly Screen _screen;
     private readonly Viewport _viewport;
     private readonly TextBuffer _buffer;
@@ -184,6 +188,36 @@ public sealed class EditorView
         PlaceCursor();
     }
 
+    /// <summary>
+    /// Paint a full-screen page — the ^H keymap — over the buffer: a title bar, the
+    /// lines, and a footer bar saying how to leave. Anything past the bottom of the
+    /// window is clipped rather than scrolled, which is why
+    /// <see cref="HelpScreen.Lines"/> is sized to fit a 24-row terminal.
+    ///
+    /// The caret is parked on the footer. There is nothing to type into, and a caret
+    /// blinking in the middle of a page of text reads as an edit position.
+    /// </summary>
+    public void RenderOverlay(string title, IReadOnlyList<string> lines, string footer)
+    {
+        _screen.Clear(Cell.Blank);
+
+        DrawBar(0, title);
+
+        int last = _screen.Height - 1;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            int y = i + 1;
+            if (y >= last) break;
+            string text = lines[i];
+            if (text.Length > _screen.Width) text = text[.._screen.Width];
+            _screen.PutText(0, y, text, Color.Default, Color.Default);
+        }
+
+        DrawBar(last, footer);
+        CursorX = 0;
+        CursorY = Math.Max(0, last);
+    }
+
     private void DrawTitle()
     {
         FillBar(0);
@@ -285,15 +319,56 @@ public sealed class EditorView
         int y = MessageRow;
         if (y <= 0) return;
 
-        bool prompting = ActivePrompt is not null;
-        string text = ActivePrompt is { } p ? p.Label + p.Input : Message;
-        if (text.Length == 0) return;
+        if (ActivePrompt is { } prompt) { DrawPrompt(y, prompt); return; }
+        if (Message.Length == 0) return;
 
-        (Color fg, Color bg) = MessageColors(prompting ? MessageKind.Prompt : MessageKind);
+        (Color fg, Color bg) = MessageColors(MessageKind);
 
-        string padded = new string(' ', MessagePad) + text + new string(' ', MessagePad);
+        string padded = new string(' ', MessagePad) + Message + new string(' ', MessagePad);
         if (padded.Length > _screen.Width) padded = padded[.._screen.Width];
         _screen.PutText(0, y, padded, fg, bg);
+    }
+
+    // A prompt is up to three runs rather than one string, because the status has to
+    // carry its own colour: "Not found" must read as an error while sharing a row with
+    // the amber prompt that is still waiting on a keystroke. The gap and the closing
+    // pad stay in the prompt's colour so the run opens and closes the same way.
+    //
+    // The caret is placed off Label.Length + Caret (see PlaceCursor), so a run appended
+    // after the input cannot disturb it.
+    private void DrawPrompt(int y, Prompt prompt)
+    {
+        (Color fg, Color bg) = MessageColors(MessageKind.Prompt);
+
+        string head = new string(' ', MessagePad) + prompt.Label + prompt.Input;
+        if (head.Length >= _screen.Width)
+        {
+            _screen.PutText(0, y, head.AsSpan(0, _screen.Width), fg, bg);
+            return;
+        }
+
+        _screen.PutText(0, y, head, fg, bg);
+        int x = head.Length;
+
+        if (prompt.Status.Length > 0)
+        {
+            int gap = Math.Min(StatusGap, _screen.Width - x);
+            _screen.PutText(x, y, new string(' ', gap), fg, bg);
+            x += gap;
+
+            // Leave room for the closing pad: a status clipped flush to the last cell
+            // would make the run look truncated even when it is not.
+            int room = _screen.Width - x - MessagePad;
+            if (room <= 0) return;
+
+            int shown = Math.Min(prompt.Status.Length, room);
+            (Color statusFg, Color statusBg) = MessageColors(prompt.StatusKind);
+            _screen.PutText(x, y, prompt.Status.AsSpan(0, shown), statusFg, statusBg);
+            x += shown;
+        }
+
+        int pad = Math.Min(MessagePad, _screen.Width - x);
+        if (pad > 0) _screen.PutText(x, y, new string(' ', pad), fg, bg);
     }
 
     private static (Color Fg, Color Bg) MessageColors(MessageKind kind) => kind switch
@@ -315,6 +390,11 @@ public sealed class EditorView
     private void DrawHelpRow(int y, string text)
     {
         if (y <= 0) return;
+        DrawBar(y, text);
+    }
+
+    private void DrawBar(int y, string text)
+    {
         FillBar(y);
         if (text.Length > _screen.Width) text = text[.._screen.Width];
         _screen.PutText(0, y, text, BarFg, BarBg);

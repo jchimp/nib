@@ -1,11 +1,11 @@
 # Project Progress
 
 ## Current Focus
-Phase 6 (polish). Phase 6b landed 2026-08-23 on `phase6-config`: `%APPDATA%\nib\config.toml` with four
-keys, and the flags that override them. 249 tests green. Nib has been in daily use at home and work on
-config and code files since the phase-5 build with no data loss and no console corruption, which
-discharges most of the interactive acceptance that was outstanding for phases 3-5 and ticks phase 6's own
-"two weeks of daily use". Next: search and replace, then mouse, then the full help screen.
+Phase 6 (polish). Phase 6c landed 2026-08-23 on `phase6-search`: search, replace-with-confirm, and the
+full `^H` keymap screen, plus `^W` counts. 327 tests green. Nib has been in daily use at home and work on config and code
+files since the phase-5 build with no data loss and no console corruption, which discharges most of the
+interactive acceptance that was outstanding for phases 3-5 and ticks phase 6's own "two weeks of daily
+use". Next: mouse, then a final pass over the help screen once the mouse keys exist.
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
@@ -17,11 +17,106 @@ discharges most of the interactive acceptance that was outstanding for phases 3-
 - [x] Phase-3/4/5 interactive acceptance — answered by field use rather than a scripted run: daily editing of real config and code files at home and work, no data loss, no shell left broken, selection/clipboard/undo and colour all behaving
 - [ ] The three checks daily use does *not* cover, worth one five-minute sitting: (1) colour in legacy `conhost` as well as Windows Terminal, and clean degradation if VT processing cannot be set; (2) copy → Notepad/browser → back round-trips line endings; (3) a save interrupted mid-write leaves the original intact
 - [ ] Phase 6a hardware pass: `nib newfile.conf` then ^S; `nib +500 <file>`; ^G with a junk value and with Esc; ^H; the 80-column help rows; a real `.ts`/`.tsx` file coloured
+- [ ] Phase 6c hardware pass: `^F` then `F3` through a wrap and `Shift+F3` back out; `Alt+C`/`Alt+W`
+      inside the prompt (the label badges change and so do the hits); a term that is not there reports in
+      red with the caret unmoved; `^R` answering Y, N and then A, with one `^Z` undoing the whole A run;
+      `^H` at 80 columns and on a 24-row window; `^W` with and without a selection
 - [ ] Phase 6b hardware pass, on the back of 6a: a config with all four keys non-default takes effect; `--theme` overrides it and `--no-config` ignores it; `mouse = false` gives the terminal its drag-select back and `mouse = true` takes it away; a corrupt line reports in red on the message row and the editor still opens
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
 ## Progress Log
+
+### 2026-08-23 (^W counts)
+
+- `^W` reports lines, words and characters — the selection's when there is one, the file's when there
+  is not. Cleared the last actionable item in `docs/private/JPC-TODO.md`.
+- The todo offered two designs ("top right corner, or Ctrl+W"). Took `^W`. A persistent corner count is
+  O(buffer) against a title row redrawn every frame, so it would want a cache invalidated off
+  `LinesChanged` to earn its place, plus `DrawTitle` reworked to right-align — it left-aligns and clips
+  the right edge today, which is exactly where the counts would have gone. The banner answers the same
+  question for none of that.
+- `Model/TextStats.cs`, console-free like the rest of `Model/`: `Of(TextBuffer)` and `Of(string)`, the
+  second for a span as `GetRange` hands it over.
+- **A word is a run of non-whitespace** — `wc -w`'s rule, nano's, and the one `Cursor.WordLeft`/
+  `WordRight` already use for `^arrow` movement. It deliberately disagrees with the whole-word *search*
+  boundary added an hour earlier, which counts letters, digits and underscore: `foo,bar` is one word to
+  move through and two to match. Both are right for what they do, and the divergence is commented at
+  both ends so neither reads as the other one's bug.
+- **Chars counts terminators**, so a CRLF line costs two. They are characters the file holds, and not
+  counting them under-reports every config file on this machine. It is a character count and not a byte
+  count; the two part company the moment a file is UTF-16.
+- `TextStats.LineCount` is now the single definition of the nano-style "trailing empty unterminated line
+  doesn't count" rule, and `Editor.LinesWritten` delegates to it. `^W` reporting 1,284 lines a keystroke
+  after `^S` said it wrote 1,283 is the sort of small disagreement that costs you trust in both numbers.
+- `^W` went on the help *screen* rather than the rows — the rows are at 75 and 69 columns against 80 and
+  have no room. It shares the Display line as a third column, so the page stayed at 22 lines against the
+  22 a 24-row window has.
+- Tests: 327 green (was 305). New `TextStatsTests` (the trailing-line rule in both directions including
+  the one-empty-line buffer it must not zero, CRLF as one line and two chars, a theory over the word
+  rule) plus selection-count cases in `EditorCommandsTests` — including the stale-anchor one, since the
+  count goes through the same clamping `SelectionRange` as everything else — and `^W` in `KeymapTests`
+  and `HelpScreenTests`.
+- Not verified here: the banner on a real console.
+
+### 2026-08-23 (phase 6c — search, replace, help screen)
+
+- `^F` find, `^R` replace confirming each hit, `F3`/`Shift+F3` to repeat forward and backward, `Alt+C`
+  and `Alt+W` toggling case and whole word from inside the prompt. `Model/TextSearch.cs` +
+  `Model/SearchState.cs` are console-free like the rest of `Model/`, so all of the scanning and all of
+  the wrap arithmetic is testable with nothing but the BCL.
+- **Direction is keys, not a mode.** Jeremy asked for backward and forward search without a toggle, and
+  that is the better design anyway: a direction toggle is a mode you can be on the wrong side of without
+  knowing, and `F3`/`Shift+F3` is CUA muscle memory that costs no Ctrl chord. It also costs no keymap
+  work — `InputReader` casts `wVirtualKeyCode` straight to `ConsoleKey`, so VK_F3 already arrived as
+  `ConsoleKey.F3` carrying a zero `UnicodeChar` and was falling harmlessly through to the printable-text
+  fallback. `KeymapTests` pins that it now dispatches and still types nothing.
+- **Replace-all is one undo step and needed no new undo machinery.** `Edit` is already "at Start, Removed
+  became Inserted", so the entire run is expressible as a *single* Edit spanning the first hit to the
+  last, with the replacements baked into the inserted text — one `ApplyReplace`, one `LinesChanged`, one
+  `^Z`. The span is stitched together out of `GetRange` calls over the gaps between matches, which is
+  what keeps mixed line endings intact through a multi-line replacement. The cost is that the undo entry
+  holds the span twice over; at this editor's few-MB target that is cheaper than a second kind of undo
+  record, and undo is not where this project wants more moving parts. Confirm-each stays one step *per*
+  hit, deliberately: it is a per-hit gesture and per-hit undo is what matches it.
+- **The rule that stops `a` → `aa` looping forever**: always resume scanning from the end of the
+  *inserted* text, never from the match start. It applies to `ReplaceMatch`'s caret placement and to
+  `FindAll`'s advance, and it is the kind of thing that works fine on every test term that isn't a
+  substring of its own replacement.
+- Backwards search needed the one piece of special handling. After a hit the caret sits on the far end of
+  it, so a naive backwards search finds the same match again and `Shift+F3` never moves. `Seek` starts
+  from the near end of the selection when going backwards.
+- Nothing found leaves the caret exactly where it was, and `wrapped` is false on a miss so "not found"
+  can never also claim to have wrapped. Both are ROADMAP acceptance criteria and both are pinned.
+- Whole-word is letters, digits and underscore — deliberately **not** the whitespace-delimited definition
+  `Cursor.WordLeft`/`WordRight` use for `^arrow` movement. Under that rule `foo,` is one word, so a
+  whole-word search for `foo` would refuse to match it. Commented at the predicate, because the
+  divergence reads as an oversight.
+- `LastIndexIn` walks forward keeping the best rather than calling `string.LastIndexOf`: that overload's
+  `startIndex`/`count` semantics run the opposite way from `IndexOf`'s. Lines are short and the scan is
+  cheap; being obviously right was worth more.
+- **The full `^H` help screen landed here rather than after mouse**, which is ahead of the ROADMAP's
+  ordering and was a deliberate call. Search is the point where the one-line hint provably stopped
+  fitting: `Row1` was 72 columns, `Row2` 74, `Hint` 77 against a budget of 80, and `^F` plus `^R` fit on
+  none of the three. The alternative was a hint that silently dropped `Alt+T`/`Alt+N` — the exact failure
+  the hint entry exists to record. `HelpBar.Hint` is gone, the rows carry the hourly keys plus `^F`/`^R`,
+  and `^A`/`^U` moved onto the screen. It wants one more pass once mouse keys exist.
+- `RunPrompt` grew an optional `onChord` first-refusal hook. It swallowed *every* Ctrl/Alt combination
+  before, which is right for Save-as and go-to-line and wrong for search, where `Alt+C`/`Alt+W` have to
+  toggle mid-term. `Prompt.Label` became settable for the same reason: the `[Aa]`/`[W]` badges in the
+  label are the only place that state is visible while you are typing.
+- Replace walks from the top of the file rather than from the caret. nano replaces from the cursor, but
+  "Replaced 3" on a file with 11 hits — because the other 8 were above where you happened to be sitting —
+  is a bug report waiting to happen, and starting at the top gives the walk a natural end (it stops on
+  the first `FoundWrapped`).
+- Tests: 305 green (was 249). New `TextSearchTests` (wrap in both directions, the rejected-boundary hit
+  that must not hide a real one behind it, overlapping terms, a clamped out-of-range caret) and
+  `HelpScreenTests` (every line against 80 columns, the whole page against a 24-row window, and a theory
+  asserting every bound chord is documented somewhere on it). Plus search/replace cases in
+  `EditorCommandsTests`, four in `KeymapTests`, and `HelpBarTests` rewritten for the rows' new job.
+- Not verified here: anything needing a live console — the two prompt loops, the confirm-each loop and
+  the help screen are all modal and all console-bound. See the phase-6c hardware pass in Open Todos.
+- Next: mouse.
 
 ### 2026-08-23 (config.toml)
 
