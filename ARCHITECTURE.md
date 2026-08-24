@@ -548,7 +548,7 @@ Read these five, in this order — they unlock the rest:
 
 Then, as needed: [Terminal/ConsoleHost.cs](src/Nib/Terminal/ConsoleHost.cs) for the
 raw-mode contract, [Terminal/Screen.cs](src/Nib/Terminal/Screen.cs) for the render
-diff, and [Ui/EditorView.cs](src/Nib/UI/EditorView.cs) for the char-index →
+diff, and [Ui/EditorView.cs](src/Nib/Ui/EditorView.cs) for the char-index →
 display-column mapping (tabs, selection, spans, all walked in one pass).
 
 ---

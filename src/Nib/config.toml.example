@@ -17,8 +17,9 @@ theme = "dark-plus"
 tab_width = 8
 
 # false leaves the terminal its own drag-select-and-copy. true hands those
-# events to nib instead, which currently does nothing with them.
-mouse = true
+# events to nib instead, which currently does nothing with them — so this
+# stays off until nib actually handles clicks.
+mouse = false
 
 # The line-number gutter. Alt+N toggles it for the session.
 line_numbers = false

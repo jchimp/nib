@@ -49,7 +49,7 @@ public class ConfigTests
     {
         Assert.Null(Config.Default.Theme);
         Assert.Equal(TabStops.DefaultTabWidth, Config.Default.TabWidth);
-        Assert.True(Config.Default.Mouse);
+        Assert.False(Config.Default.Mouse);
         Assert.False(Config.Default.LineNumbers);
     }
 
@@ -60,14 +60,14 @@ public class ConfigTests
             [editor]
             theme = "monokai"
             tab_width = 4
-            mouse = false
+            mouse = true
             line_numbers = true
             """, out IReadOnlyList<string> problems);
 
         Assert.Empty(problems);
         Assert.Equal("monokai", config.Theme);
         Assert.Equal(4, config.TabWidth);
-        Assert.False(config.Mouse);
+        Assert.True(config.Mouse);
         Assert.True(config.LineNumbers);
     }
 
@@ -108,7 +108,7 @@ public class ConfigTests
         var good = new List<string>();
         if (!Names(bad, "theme")) good.Add("theme = \"solarized-dark\"");
         if (!Names(bad, "tab_width")) good.Add("tab_width = 4");
-        if (!Names(bad, "mouse")) good.Add("mouse = false");
+        if (!Names(bad, "mouse")) good.Add("mouse = true");
         if (!Names(bad, "line_numbers")) good.Add("line_numbers = true");
 
         string text = string.Join('\n',
@@ -121,7 +121,7 @@ public class ConfigTests
 
         if (!Names(bad, "theme")) Assert.Equal("solarized-dark", config.Theme);
         if (!Names(bad, "tab_width")) Assert.Equal(4, config.TabWidth);
-        if (!Names(bad, "mouse")) Assert.False(config.Mouse);
+        if (!Names(bad, "mouse")) Assert.True(config.Mouse);
         if (!Names(bad, "line_numbers")) Assert.True(config.LineNumbers);
     }
 
@@ -181,13 +181,13 @@ public class ConfigTests
     public void CRLF_endings_and_a_UTF8_BOM_both_parse()
     {
         var bytes = new List<byte>(Encoding.UTF8.GetPreamble());
-        bytes.AddRange(Encoding.UTF8.GetBytes("[editor]\r\ntab_width = 3\r\nmouse = false\r\n"));
+        bytes.AddRange(Encoding.UTF8.GetBytes("[editor]\r\ntab_width = 3\r\nmouse = true\r\n"));
 
         Config config = Parse(bytes.ToArray(), out IReadOnlyList<string> problems);
 
         Assert.Empty(problems);
         Assert.Equal(3, config.TabWidth);
-        Assert.False(config.Mouse);
+        Assert.True(config.Mouse);
     }
 
     [Fact]

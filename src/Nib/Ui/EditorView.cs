@@ -270,8 +270,13 @@ public sealed class EditorView
                 int stop = Viewport.NextTabStop(col, _viewport.TabWidth);
                 for (; col < stop; col++)
                 {
+                    // gutter + sx, exactly as the glyph branch below. A tab paints
+                    // several cells rather than one, so the offset is easy to drop
+                    // here and the mistake is invisible in the text: the glyphs after
+                    // the tab still land correctly and only the tab's own cells are
+                    // wrong, over the top of the line number.
                     int sx = col - first;
-                    if (sx >= 0 && sx < width) _screen.Set(sx, y, ' ', Color.Default, bg);
+                    if (sx >= 0 && sx < width) _screen.Set(gutter + sx, y, ' ', Color.Default, bg);
                 }
             }
             else

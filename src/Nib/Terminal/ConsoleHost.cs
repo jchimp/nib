@@ -99,7 +99,7 @@ public sealed class ConsoleHost : IDisposable
         return mode;
     }
 
-    public static ConsoleHost Acquire(bool enableMouse = true)
+    public static ConsoleHost Acquire(bool enableMouse = false)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("Nib targets the Windows console host.");

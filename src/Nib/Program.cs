@@ -180,8 +180,8 @@ internal static class Program
         Console.WriteLine("  --tab-width <n>");
         Console.WriteLine($"                 tab stop every n columns, {Config.MinTabWidth}-{Config.MaxTabWidth} (default {TabStops.DefaultTabWidth})");
         Console.WriteLine("  --mouse, --no-mouse");
-        Console.WriteLine("                 capture the mouse; off leaves the terminal its own");
-        Console.WriteLine("                 drag-select and copy");
+        Console.WriteLine("                 capture the mouse (default off, so the terminal keeps");
+        Console.WriteLine("                 its own drag-select and copy)");
         Console.WriteLine("  --no-config    ignore config.toml");
         Console.WriteLine("  --probe        run the phase-1 terminal probe");
         Console.WriteLine("  --soak [dir] [passes]");
@@ -328,7 +328,14 @@ internal sealed class Editor
             _batch.Clear();
             if (_reader.ReadBatch(_batch) == 0) continue;
 
-            _view.Message = ""; // stale feedback clears on the next keystroke
+            // Stale feedback clears on the next keystroke — but only on a keystroke.
+            // With the mouse captured the console emits a record for every pointer
+            // *move*, so clearing on any non-empty batch meant dragging across the
+            // window wiped "Wrote 42 lines" (or an error) for a gesture that is not
+            // user intent and that the loop below discards anyway. Scanned up front
+            // rather than tracked inside the loop, because the clear has to land
+            // before the first command runs or it eats that command's own message.
+            if (HasKey(_batch)) _view.Message = "";
             int pageRows = Math.Max(1, _view.TextRows - 1);
 
             foreach (InputEvent ev in _batch)
@@ -371,6 +378,15 @@ internal sealed class Editor
 
             Draw();
         }
+    }
+
+    private static bool HasKey(List<InputEvent> batch)
+    {
+        foreach (InputEvent ev in batch)
+        {
+            if (ev.Kind == InputEventKind.Key) return true;
+        }
+        return false;
     }
 
     // A command threw. Put the cursor somewhere legal — MoveTo clamps, and a cursor
