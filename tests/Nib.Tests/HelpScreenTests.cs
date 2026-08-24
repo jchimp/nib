@@ -53,6 +53,7 @@ public class HelpScreenTests
     [InlineData("^G")]
     [InlineData("^F")]
     [InlineData("^R")]
+    [InlineData("^W")]
     [InlineData("F3")]
     [InlineData("Alt+T")]
     [InlineData("Alt+N")]
