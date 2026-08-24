@@ -29,7 +29,14 @@ public sealed record Config
 
     public int TabWidth { get; init; } = TabStops.DefaultTabWidth;
 
-    public bool Mouse { get; init; } = true;
+    /// <summary>
+    /// Off by default, and deliberately so until the mouse handler lands: capturing
+    /// the mouse costs the terminal its own ENABLE_QUICK_EDIT_MODE drag-select-and-copy,
+    /// and the editor loop discards every mouse event it receives. That trade is worth
+    /// making once clicks position the caret; it is a pure loss before then. Flip this
+    /// back with phase 6's mouse work.
+    /// </summary>
+    public bool Mouse { get; init; }
 
     public bool LineNumbers { get; init; }
 

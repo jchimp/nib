@@ -154,4 +154,55 @@ public class LineNumberGutterTests
         // Row 4 is the first past the 3-line buffer, and still inside the text body.
         Assert.Equal("  ", RowText(screen, 4, 0, 2));
     }
+
+    // A tab paints a run of cells rather than one, and that run used to be written
+    // without the gutter offset every other glyph gets. The text still looked right —
+    // the characters after the tab land correctly either way — so the only visible
+    // damage was the line number underneath, which is why nothing above caught it:
+    // every other case in this file uses tab-free text.
+    [Fact]
+    public void A_leading_tab_does_not_paint_over_the_line_number()
+    {
+        (EditorView view, Screen screen, _, _, _) = Setup(Width, "\tindented");
+        view.ShowLineNumbers = true;
+
+        view.Render();
+
+        // Gutter is "1 "; the tab then fills display columns 0-7, so the text starts
+        // at screen column GutterWidth + 8.
+        Assert.Equal(2, view.GutterWidth);
+        Assert.Equal("1" + new string(' ', 9) + "indented", RowText(screen, 1, 0, 18));
+    }
+
+    // The same offset carries the selection background, so getting it wrong moves the
+    // highlight into the gutter and leaves the last cells of the tab unpainted. That
+    // misreports what a ^X is about to take, which is the half of this that is a
+    // correctness problem rather than a cosmetic one.
+    [Fact]
+    public void A_selected_tab_is_highlighted_after_the_gutter_not_inside_it()
+    {
+        (EditorView view, Screen screen, _, Cursor cursor, _) = Setup(Width, "\tindented");
+        view.ShowLineNumbers = true;
+
+        var selection = new Selection();
+        cursor.MoveTo(0, 0);
+        selection.AnchorAt(cursor);
+        cursor.MoveTo(0, 1); // the tab, and nothing else
+        view.Selection = selection;
+
+        view.Render();
+
+        int gutter = view.GutterWidth;
+
+        // Nothing in the gutter is selected.
+        for (int x = 0; x < gutter; x++)
+            Assert.True(screen.CellAt(x, 1).Bg.IsDefault, $"gutter column {x} was highlighted");
+
+        // The whole tab is, all eight columns of it.
+        for (int x = gutter; x < gutter + 8; x++)
+            Assert.False(screen.CellAt(x, 1).Bg.IsDefault, $"tab column {x} was not highlighted");
+
+        // And the character after it is not.
+        Assert.True(screen.CellAt(gutter + 8, 1).Bg.IsDefault);
+    }
 }

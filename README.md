@@ -61,7 +61,7 @@ if it isn't there you get the defaults shown.
 [editor]
 theme = "dark-plus"
 tab_width = 8
-mouse = true
+mouse = false
 line_numbers = false
 ```
 
@@ -69,8 +69,9 @@ A command-line flag beats the file. A line nib can't read is reported on the
 message row and skipped — the rest of the file still applies, and a bad setting
 can never stop the editor opening.
 
-`mouse = false` leaves the terminal its own drag-select-and-copy, which is worth
-knowing about: with the mouse on, the console hands those events to nib instead.
+`mouse` is off by default, which leaves the terminal its own drag-select-and-copy.
+Turning it on hands those events to nib instead, and nib does not yet do anything
+with them — so it is off until clicks position the caret.
 
 | Keys | |
 |---|---|

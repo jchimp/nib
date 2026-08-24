@@ -400,7 +400,7 @@ that ever changes.
 [editor]
 theme = "dark-plus"
 tab_width = 8
-mouse = true
+mouse = false
 line_numbers = false
 ```
 
