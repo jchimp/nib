@@ -160,6 +160,14 @@ public class KeymapTests
     }
 
     [Fact]
+    public void Ctrl_W_asks_for_the_counts_and_does_not_type_a_w()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup();
+        Assert.Equal(EditorAction.Stats, Send(Ctrl(ConsoleKey.W), cmd));
+        Assert.Equal("hello world", buf.GetLine(0));
+    }
+
+    [Fact]
     public void F3_does_not_type_anything()
     {
         // It reaches the keymap as ConsoleKey.F3 with a zero UnicodeChar, and until
