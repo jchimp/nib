@@ -271,6 +271,48 @@ public class EditorCommandsTests
         Assert.NotNull(clip.Text);
     }
 
+    // ---- counts (^W) --------------------------------------------------------
+
+    [Fact]
+    public void Counting_a_selection_counts_only_what_is_selected()
+    {
+        (EditorCommands cmd, _, Cursor cur, _) = Setup("one two", "three four", "five");
+
+        Select(cmd, cur, 0, 4, 1, 5);  // "two\nthree"
+
+        TextStats stats = cmd.CountSelection();
+        Assert.Equal(2, stats.Lines);
+        Assert.Equal(2, stats.Words);
+        Assert.Equal(9, stats.Chars);
+    }
+
+    [Fact]
+    public void Counting_with_no_selection_returns_zeroes_rather_than_the_whole_buffer()
+    {
+        // The caller checks HasSelection and asks the buffer instead. Returning the
+        // file's totals here would make "Selected: 3 lines" appear over a file with
+        // nothing highlighted.
+        (EditorCommands cmd, _, _, _) = Setup("one two", "three");
+
+        Assert.False(cmd.HasSelection);
+        Assert.Equal(default, cmd.CountSelection());
+    }
+
+    [Fact]
+    public void Counting_a_selection_left_stale_by_an_edit_clamps_rather_than_throwing()
+    {
+        // Same guard every other consumer of the selection gets: the count goes
+        // through SelectionRange, so an anchor naming a row the buffer no longer has
+        // is a wrong number and not a crash.
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("alpha", "beta", "gamma");
+
+        Select(cmd, cur, 2, 0, 2, 5);
+        buf.DeleteRange(new TextPosition(0, 5), new TextPosition(2, 0));
+        cur.MoveTo(0, 0);
+
+        cmd.CountSelection(); // must not throw
+    }
+
     // ---- search and replace -------------------------------------------------
 
     private static SearchQuery Q(string text, bool matchCase = false, bool wholeWord = false)
