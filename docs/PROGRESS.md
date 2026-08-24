@@ -1,11 +1,11 @@
 # Project Progress
 
 ## Current Focus
-Phase 6 (polish). Phase 6c landed 2026-08-23 on `phase6-search`: search, replace-with-confirm, and the
-full `^H` keymap screen, plus `^W` counts. 327 tests green. Nib has been in daily use at home and work on config and code
-files since the phase-5 build with no data loss and no console corruption, which discharges most of the
-interactive acceptance that was outstanding for phases 3-5 and ticks phase 6's own "two weeks of daily
-use". Next: mouse, then a final pass over the help screen once the mouse keys exist.
+Phase 6 (polish). 6a/6b/6c all landed 2026-08-23; a senior review pass over 0.6.2 the same day found and
+fixed a real rendering bug (tabs painted over the line-number gutter) and turned the mouse capture off by
+default, since the loop discards every mouse event until phase 6's mouse work. 352 tests green. Next is
+still mouse, then the help-screen pass once the mouse keys exist; the rest of the review's findings are
+queued below in rough impact/effort order.
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
@@ -25,7 +25,44 @@ use". Next: mouse, then a final pass over the help screen once the mouse keys ex
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
+From the 2026-08-23 review (`.review/2026-08-23/01-findings.md`), in the order it recommends. Done ones
+are checked so the list stays a record of the whole pass rather than only what is left:
+- [x] **H-1** Tab cells painted without the gutter offset, erasing the line number and shifting the selection highlight
+- [x] **H-2** Mouse captured by default while every event is discarded; message row also wiped by pointer movement
+- [x] **L-4** `src/Nib/UI` renamed to `src/Nib/Ui` to match the namespace and the docs
+- [ ] **M-2** Pin `xunit`/`xunit.runner.visualstudio`/`Microsoft.NET.Test.Sdk` off `2.*`/`3.*`/`17.*` and commit lock files — the release gate runs on packages that can drift
+- [ ] **M-3** A `windows-latest` build+test workflow, so 352 tests and `ScriptEncodingTests` run at push rather than only at release
+- [ ] **H-3** Save silently clobbers a file changed on disk since load — stash the mtime and route a mismatch through the existing `Confirm`. The one real data-loss path
+- [ ] **M-5 / L-1** Bad `--tab-width`/`--theme` values, unknown flags and extra positional args are all silently ignored; route them through the message-row channel `config.toml` problems already use
+- [ ] **M-6** `FileIo.Save` does not flush to disk before `File.Replace`, so the "never a truncated config" comment overstates the guarantee
+- [ ] **M-4** `ReadBatch` returns 0 both for "nothing decoded" and for a failed `ReadConsoleInputW`, so a dead console handle busy-spins the loop instead of blocking
+- [ ] **M-7 / M-1** Extract `Editor` from the 863-line `Program.cs` and get `DoReplace`'s walk under test; revisit the unbudgeted `Walk(windowEnd, null)` at the same time, since both are the loop's frame budget
+- [ ] **L-2** `Cursor.Up()` at row 0 and `Down()` at the last row reset the desired column the class exists to preserve
+- [ ] **L-3** A line clipped at the right edge loses its trailing selection cell
+
 ## Progress Log
+
+### 2026-08-23 (review pass — gutter, mouse default, Ui rename)
+
+- Senior review over 0.6.2, written to `.review/2026-08-23/`. No criticals; three high, seven medium,
+  four low. The layering rule and the incremental tokenizer came out well; ship-readiness did not (no CI,
+  no lockfile, no tags).
+- **H-1**, the one worth the pass: `EditorView.DrawLine` wrote a tab's expanded cells to `sx` while every
+  other glyph goes to `gutter + sx`. With `-l` on, a tab painted over its own line number and carried the
+  selection background two columns left. Invisible in the text — the glyphs after a tab land correctly
+  either way — and every case in `LineNumberGutterTests` used tab-free strings. Two tests added, both
+  confirmed failing before the fix.
+- **H-2**: `Config.Mouse` defaulted true while the loop discards every mouse event, so the default cost
+  the terminal its quick-edit for nothing. Also meant a pointer crossing the window cleared the message
+  row, since `ENABLE_MOUSE_INPUT` emits a record per move and `Run` read any non-empty batch as a
+  keystroke. Default off, and the clear now guarded on the batch holding a key so `mouse = true` does not
+  inherit the symptom.
+- Four `ConfigTests` fixtures flipped to `mouse = true`: with the default now false, `mouse = false` as a
+  test *input* asserts nothing, and one of those tests states in its own comment that every unnamed key is
+  set to a non-default.
+- `src/Nib/UI` → `src/Nib/Ui` (case-only, via a temp name). 352 tests green, build still 0 warnings.
+- Next: unchanged — mouse. The remaining findings are in Open Todos above; M-2 and M-3 are the cheap ones
+  and neither touches editor code.
 
 ### 2026-08-23 (^W counts)
 
