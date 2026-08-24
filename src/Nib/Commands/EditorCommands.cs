@@ -193,6 +193,22 @@ public sealed class EditorCommands
         Cursor.MoveTo(end.Row, end.Col);
     }
 
+    /// <summary>
+    /// Lines, words and characters for the selection — what ^W reports when there is
+    /// one. Zeroes when there is not, so the caller checks
+    /// <see cref="HasSelection"/> rather than reading meaning into an empty count.
+    ///
+    /// It lives here rather than in the loop because the selection's coordinates go
+    /// through the clamping <see cref="SelectionRange"/>, and nothing outside this
+    /// class gets to index the buffer with a raw anchor.
+    /// </summary>
+    public TextStats CountSelection()
+    {
+        if (!HasSelection) return default;
+        (TextPosition start, TextPosition end) = SelectionRange();
+        return TextStats.Of(_buffer.GetRange(start, end));
+    }
+
     // ---- search / replace ---------------------------------------------------
 
     /// <summary>The remembered term and toggles, for the prompt to pre-fill and F3 to repeat.</summary>
