@@ -13,7 +13,7 @@ namespace Nib.Ui;
 /// </summary>
 public sealed class Viewport
 {
-    /// <summary>nano's default tab size. Config override arrives in phase 6.</summary>
+    /// <summary>nano's default tab size. config.toml's <c>tab_width</c> overrides it.</summary>
     public const int DefaultTabWidth = TabStops.DefaultTabWidth;
 
     /// <summary>0-based index of the document line drawn on the top text row.</summary>

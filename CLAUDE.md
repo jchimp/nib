@@ -205,6 +205,14 @@ unwinds that far, the buffer is gone.
 the same call.** Otherwise the clear is silently ignored and you get no mouse
 input with no error.
 
+That clear is **conditional on the mouse setting** (`ConsoleHost.InputMode`). With
+`mouse = false` quick-edit is left exactly as found, which is what makes the config
+key worth having before the editor consumes mouse events at all: it hands the
+terminal back its own drag-select-and-copy. `ENABLE_EXTENDED_FLAGS` is still set
+either way — it is what makes the preserved quick-edit bit mean anything. The
+arithmetic lives in `InputMode` rather than inline in `Acquire` so it can be tested
+without a console; everything else in `Acquire` cannot be.
+
 **AltGr looks exactly like Ctrl+Alt.** European layouts report AltGr as
 RightAlt + LeftCtrl. Treating that as a chord means German users cannot type `@`
 or `\`. `InputReader` checks for that combination plus a printable character and
@@ -382,6 +390,38 @@ that ever changes.
 
 ---
 
+## Configuration (phase 6b)
+
+`%APPDATA%\nib\config.toml`, four keys, no schema:
+
+```toml
+[editor]
+theme = "dark-plus"
+tab_width = 8
+mouse = true
+line_numbers = false
+```
+
+**Precedence is command line > config file > default**, and the thing that makes
+that work is that every settings field on `ParsedArgs` is nullable. With plain
+values there is no way to distinguish "`--no-mouse` was not passed" from "mouse is
+false", so a config key could never beat a flag nobody typed. Don't tidy the `?`
+away.
+
+`Model/Config.cs` is console-free like the rest of `Model/`, which is why `Load`
+takes the valid theme ids as a parameter instead of asking `GrammarManifest` for
+them. The parser is hand-rolled — a TOML package for one table and four keys would
+be a dependency and 99% dead code, and the no-third-party rule stands.
+
+**A malformed config never stops the editor opening.** The line is ignored, its key
+keeps the default, and the message row reports it in the error style. `tab_width =
+0` is a reported problem rather than a silent clamp: it is a typo, and honouring it
+divides by zero in `TabStops.NextTabStop`. An unknown theme resolves to null in
+`Config` rather than being handed down, because one layer further on it is just
+"no match" with nobody left to report it.
+
+Nib never writes this file. There is no `--write-config` and no directory creation.
+
 ## Coding conventions
 
 - File-scoped namespaces, nullable enabled, `TreatWarningsAsErrors`.
@@ -400,9 +440,12 @@ that ever changes.
 - **Phase 1 — terminal foundation: verified on hardware (2026-07-26).**
   `Program.cs` is an interactive probe, not an editor. All five checks confirmed
   on a real console; the foundation is cleared for phase 2.
-- **Phases 2–5 implemented and unit-tested (158 tests).** Phase 5 landed
-  2026-07-27; the interactive acceptance for phases 3–5 still wants a hardware run.
-- Phase 6: see `ROADMAP.md` (note: at the repo root, not `docs/`).
+- **Phases 2–5 implemented and unit-tested.** Phase 5 landed 2026-07-27; daily use
+  since has discharged most of the interactive acceptance for phases 3–5.
+- **Phase 6 in progress (249 tests).** 6a (keymap/startup papercuts, TypeScript) and
+  6b (config.toml) landed 2026-08-23; both want a hardware pass. Next is search and
+  replace. See `ROADMAP.md` (note: at the repo root, not `docs/`) and
+  `docs/PROGRESS.md`.
 
 ### Corrections carried forward
 

@@ -9,7 +9,7 @@ namespace Nib.Model;
 /// </summary>
 public static class TabStops
 {
-    /// <summary>nano's default tab size. The config override arrives in phase 6.</summary>
+    /// <summary>nano's default tab size. config.toml's <c>tab_width</c> overrides it.</summary>
     public const int DefaultTabWidth = 8;
 
     /// <summary>The display column a tab lands on when it starts at <paramref name="col"/>.</summary>
