@@ -1,0 +1,24 @@
+# nib settings — %APPDATA%\nib\config.toml
+#
+# Every key is optional; the values below are the defaults, so this file as
+# written changes nothing. Delete the ones you don't care about.
+#
+# A command-line flag beats this file. A line nib can't read is reported on
+# the message row and skipped — the rest still applies.
+
+[editor]
+
+# dark-plus | light-plus | monokai | solarized-dark | high-contrast
+# Alt+T cycles at runtime; this is only the one it starts on.
+theme = "dark-plus"
+
+# Columns per tab stop, 1-16. Display only — nib never converts tabs to
+# spaces or back, so this cannot change a byte of your file.
+tab_width = 8
+
+# false leaves the terminal its own drag-select-and-copy. true hands those
+# events to nib instead, which currently does nothing with them.
+mouse = true
+
+# The line-number gutter. Alt+N toggles it for the session.
+line_numbers = false

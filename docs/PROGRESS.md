@@ -1,11 +1,11 @@
 # Project Progress
 
 ## Current Focus
-Phase 6 (polish). Phase 6a landed 2026-08-23 on `phase6-keys`: the six keymap/startup papercuts from
-`docs/private/JPC-TODO.md`, plus TypeScript and TSX highlighting. 188 tests green. Nib has been in daily
-use at home and work on config and code files since the phase-5 build with no data loss and no console
-corruption, which discharges most of the interactive acceptance that was outstanding for phases 3-5 and
-ticks phase 6's own "two weeks of daily use". Next: `%APPDATA%\nib\config.toml`, then search and replace.
+Phase 6 (polish). Phase 6b landed 2026-08-23 on `phase6-config`: `%APPDATA%\nib\config.toml` with four
+keys, and the flags that override them. 249 tests green. Nib has been in daily use at home and work on
+config and code files since the phase-5 build with no data loss and no console corruption, which
+discharges most of the interactive acceptance that was outstanding for phases 3-5 and ticks phase 6's own
+"two weeks of daily use". Next: search and replace, then mouse, then the full help screen.
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
@@ -17,10 +17,49 @@ ticks phase 6's own "two weeks of daily use". Next: `%APPDATA%\nib\config.toml`,
 - [x] Phase-3/4/5 interactive acceptance — answered by field use rather than a scripted run: daily editing of real config and code files at home and work, no data loss, no shell left broken, selection/clipboard/undo and colour all behaving
 - [ ] The three checks daily use does *not* cover, worth one five-minute sitting: (1) colour in legacy `conhost` as well as Windows Terminal, and clean degradation if VT processing cannot be set; (2) copy → Notepad/browser → back round-trips line endings; (3) a save interrupted mid-write leaves the original intact
 - [ ] Phase 6a hardware pass: `nib newfile.conf` then ^S; `nib +500 <file>`; ^G with a junk value and with Esc; ^H; the 80-column help rows; a real `.ts`/`.tsx` file coloured
+- [ ] Phase 6b hardware pass, on the back of 6a: a config with all four keys non-default takes effect; `--theme` overrides it and `--no-config` ignores it; `mouse = false` gives the terminal its drag-select back and `mouse = true` takes it away; a corrupt line reports in red on the message row and the editor still opens
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
 ## Progress Log
+
+### 2026-08-23 (config.toml)
+
+- `%APPDATA%\nib\config.toml`, four keys under `[editor]`: `theme`, `tab_width`, `mouse`, `line_numbers`.
+  ROADMAP listed the first three; the fourth was promised by the gutter entry below. Nib reads this file
+  and never writes it — no `--write-config`, no directory creation. A missing file is the normal case.
+- `Model/Config.cs`, not `Ui/` or `Terminal/`: console-free, which is what makes the parser and all its
+  failure cases testable. It is also why `Load` takes the valid theme ids as an argument instead of asking
+  `GrammarManifest` for them — `Model/` does not reach upward, and `Program` is already holding both.
+- Hand-rolled parser, ~90 lines, no TOML package. The grammar is one table header, four keys, integers,
+  lowercase booleans and quoted strings; a real TOML library would be a dependency and 99% dead code.
+- **Nullable `ParsedArgs` is what makes precedence work.** The arg loop came out of `Main` into
+  `Program.Parse`, and its four settings fields are `string?`/`int?`/`bool?` rather than defaulted. With
+  plain values there is no way to tell "`--no-mouse` was not passed" from "mouse is false", so a config
+  key could never win over a flag nobody typed. `--tab-width`, `--mouse`/`--no-mouse`,
+  `--no-line-numbers` and `--no-config` came along with it so every key has an override.
+- **`mouse = false` had to earn its keep.** The obvious implementation is to thread the bool into the
+  `ConsoleHost.Acquire(enableMouse:)` parameter that has sat unused since phase 1 — and it would have
+  done nothing observable, because mouse events are still discarded in the loop until phase 6's mouse
+  work. So the `ENABLE_QUICK_EDIT_MODE` clear is now conditional on it: with the mouse off, quick-edit is
+  left exactly as found and the user keeps Windows Terminal's own drag-select-and-copy. That is the whole
+  point of the key today. `ENABLE_EXTENDED_FLAGS` still goes in either way — it is what makes the
+  preserved quick-edit bit mean anything. Written up in CLAUDE.md's Win32 landmines.
+- The flag arithmetic came out of `Acquire` into `ConsoleHost.InputMode(origIn, enableMouse)` so it could
+  be pinned without a console, the same trick `ConsoleCtrlHandlerTests` plays on the control handler.
+- A bad line is never fatal: it is ignored, its key keeps the default, and the message row reports it in
+  the error style. `tab_width = 0` is a problem rather than a silent clamp — it is a typo, and honouring
+  it divides by zero in `TabStops.NextTabStop`. An unknown theme resolves to null here rather than being
+  passed down, because one layer further on it becomes "no match" with nobody left to report it.
+- Found while writing the tests: `StripComment` cut at `#` only for unquoted values, so
+  `theme = "monokai"  # the pink one` failed as "must be a quoted string". The scan is quote-aware now.
+  Cutting at neither or both is exactly how this goes wrong.
+- Tests: 249 green (was 212). New `ConfigTests` (the theory that matters brackets each bad line with
+  every *other* key set to a non-default, so a parser that stops at the first problem fails rather than
+  quietly dropping the rest of the file), `StartupArgsTests` — the arg loop had never been tested at all —
+  and `ConsoleInputModeTests`.
+- Not verified here: anything needing a live console. See the phase-6b hardware pass in Open Todos.
+- Next: search and replace.
 
 ### 2026-08-23 (message row styling)
 - The message row painted in `Color.Default` on `Color.Default` - identical to body text, which is why "Save modified buffer?" never caught the eye. It now has three tiers: info (pale on slate), error (pale on dark red), prompt (dark on amber, inverted against the other two on purpose - a row waiting on a keystroke should not look like a row reporting one).

@@ -205,13 +205,17 @@ for YAML specifically). All three are written up in CLAUDE.md and covered by tes
 
 **Build**
 
-- Search, search-again, replace with confirm-each, case and whole-word toggles
+- Search, search-again, replace with confirm-each, case and whole-word toggles ← next
 - ~~Go to line~~ — done in phase 6a: `^G`, and `+LINE file` on the command line
 - Mouse: click to position, drag to select, wheel to scroll
 - Help screen — still the one-line hint, now on `^H`. The full screen is
   deferred until search and mouse are in, so it documents a finished keymap
   rather than being rewritten twice
-- `%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off ← next
+- ~~`%APPDATA%\nib\config.toml` — theme, tab width, mouse on/off~~ — done in phase
+  6b, with `line_numbers` as a fourth key. `--tab-width`, `--mouse`/`--no-mouse` and
+  `--no-config` came with it so every key has a flag that beats it. `mouse = false`
+  now also leaves `ENABLE_QUICK_EDIT_MODE` alone, so it hands the terminal back its
+  own drag-select rather than turning off a capability nothing reads yet
 - ~~`nib --version`, `--help`~~ — done. `+LINE file` was listed here as done
   and was not; it landed in phase 6a alongside go-to-line.
 - Distribution: `scripts/release.ps1` builds a self-contained zip with an installer.

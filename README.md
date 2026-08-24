@@ -40,7 +40,10 @@ exe.
 usage: nib [options] [+LINE] [file]
 
   --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast
-  -l, --line-numbers
+  -l, --line-numbers, --no-line-numbers
+  --tab-width <n>          1-16, default 8
+  --mouse, --no-mouse
+  --no-config              ignore config.toml
   -h, --help
   -v, --version
 ```
@@ -48,6 +51,26 @@ usage: nib [options] [+LINE] [file]
 A file that does not exist opens as a new, empty buffer already named for it, so
 `nib newthing.conf` then Ctrl+S writes the file. `+LINE` opens at a line:
 `nib +200 app.log`.
+
+## Settings
+
+Optional, at `%APPDATA%\nib\config.toml`. Nib reads this file and never writes it;
+if it isn't there you get the defaults shown.
+
+```toml
+[editor]
+theme = "dark-plus"
+tab_width = 8
+mouse = true
+line_numbers = false
+```
+
+A command-line flag beats the file. A line nib can't read is reported on the
+message row and skipped — the rest of the file still applies, and a bad setting
+can never stop the editor opening.
+
+`mouse = false` leaves the terminal its own drag-select-and-copy, which is worth
+knowing about: with the mouse on, the console hands those events to nib instead.
 
 | Keys | |
 |---|---|

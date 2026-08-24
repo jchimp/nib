@@ -18,42 +18,39 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        bool probe = false;
-        bool soak = false;
-        string? file = null;
-        string? theme = null;
-        int startLine = 0; // 0 = unset; nano's +LINE
-        bool lineNumbers = false;
-        var positional = new List<string>();
+        ParsedArgs cli = Parse(args);
+        if (cli.Help) { PrintHelp(); return 0; }
+        if (cli.Version) { PrintVersion(); return 0; }
 
-        for (int i = 0; i < args.Length; i++)
+        // Diagnostic path: no console acquisition, no config, ordinary stdout. See Soak.
+        if (cli.Soak)
         {
-            string a = args[i];
-            switch (a)
-            {
-                case "--probe": probe = true; break;
-                case "--soak": soak = true; break;
-                case "--theme": theme = i + 1 < args.Length ? args[++i] : null; break;
-                case "--line-numbers" or "-l": lineNumbers = true; break;
-                case "--help" or "-h": PrintHelp(); return 0;
-                case "--version" or "-v": PrintVersion(); return 0;
-                default:
-                    // `+123` opens at a line, as nano does. It does not start with '-',
-                    // so without this it would be taken for the filename.
-                    if (a.Length > 1 && a[0] == '+' && int.TryParse(a[1..], out int n) && n > 0)
-                        startLine = n;
-                    else if (!a.StartsWith('-')) { positional.Add(a); file ??= a; }
-                    break;
-            }
-        }
-
-        // Diagnostic path: no console acquisition, ordinary stdout. See Soak.
-        if (soak)
-        {
-            string? dir = positional.Count > 0 ? positional[0] : null;
-            int passes = positional.Count > 1 && int.TryParse(positional[1], out int p) ? p : 3;
+            string? dir = cli.Positional.Count > 0 ? cli.Positional[0] : null;
+            int passes = cli.Positional.Count > 1 && int.TryParse(cli.Positional[1], out int p) ? p : 3;
             return Highlight.Soak.Run(dir, passes);
         }
+
+        // Command line beats config file beats built-in default. Every settings
+        // field on ParsedArgs is nullable for exactly this: "--no-mouse was not
+        // passed" and "mouse was set to the default" have to be distinguishable, or
+        // a config value could never win over a flag that was never typed.
+        Config config = Config.Default;
+        string? configProblem = null;
+        if (!cli.NoConfig)
+        {
+            config = Config.Load(
+                Config.DefaultPath,
+                GrammarManifest.Load().ThemeIds,
+                out IReadOnlyList<string> problems);
+            if (problems.Count > 0) configProblem = Config.DescribeProblems(problems);
+        }
+
+        string? theme = cli.Theme ?? config.Theme;
+        int tabWidth = cli.TabWidth ?? config.TabWidth;
+        bool mouse = cli.Mouse ?? config.Mouse;
+        bool lineNumbers = cli.LineNumbers ?? config.LineNumbers;
+        bool probe = cli.Probe;
+        string? file = cli.File;
 
         // Load before touching the console: a bad path should print to a normal
         // shell, not from inside the alternate screen.
@@ -94,10 +91,14 @@ internal static class Program
             }
         }
 
+        // A settings error the user can act on outranks "New File", which the title
+        // row already says.
+        if (configProblem is not null) openingMessage = configProblem;
+
         ConsoleHost host;
         try
         {
-            host = ConsoleHost.Acquire();
+            host = ConsoleHost.Acquire(enableMouse: mouse);
         }
         catch (Exception ex)
         {
@@ -108,7 +109,9 @@ internal static class Program
         try
         {
             if (probe) Probe.Run(host);
-            else new Editor(host, buffer!, theme, openingMessage, startLine, lineNumbers).Run();
+            else new Editor(
+                host, buffer!, theme, openingMessage, cli.StartLine, lineNumbers, tabWidth,
+                configProblem is null ? MessageKind.Info : MessageKind.Error).Run();
             return 0;
         }
         finally
@@ -119,6 +122,52 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// The command line, with the four config-backed settings left null when their
+    /// flag was not passed so <see cref="Main"/> can layer the config file under
+    /// them. Unrecognised <c>-flags</c> are ignored, as they always have been.
+    /// </summary>
+    internal static ParsedArgs Parse(string[] args)
+    {
+        var result = new ParsedArgs();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            string a = args[i];
+            switch (a)
+            {
+                case "--probe": result.Probe = true; break;
+                case "--soak": result.Soak = true; break;
+                case "--theme": result.Theme = i + 1 < args.Length ? args[++i] : null; break;
+                case "--tab-width":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int w)
+                        && w >= Config.MinTabWidth && w <= Config.MaxTabWidth)
+                        result.TabWidth = w;
+                    break;
+                case "--mouse": result.Mouse = true; break;
+                case "--no-mouse": result.Mouse = false; break;
+                case "--no-config": result.NoConfig = true; break;
+                case "--line-numbers" or "-l": result.LineNumbers = true; break;
+                case "--no-line-numbers": result.LineNumbers = false; break;
+                case "--help" or "-h": result.Help = true; break;
+                case "--version" or "-v": result.Version = true; break;
+                default:
+                    // `+123` opens at a line, as nano does. It does not start with '-',
+                    // so without this it would be taken for the filename.
+                    if (a.Length > 1 && a[0] == '+' && int.TryParse(a[1..], out int n) && n > 0)
+                        result.StartLine = n;
+                    else if (!a.StartsWith('-'))
+                    {
+                        result.Positional.Add(a);
+                        result.File ??= a;
+                    }
+                    break;
+            }
+        }
+
+        return result;
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("nib — a console text editor");
@@ -126,8 +175,14 @@ internal static class Program
         Console.WriteLine("usage: nib [options] [+LINE] [file]");
         Console.WriteLine();
         Console.WriteLine("  --theme <id>   dark-plus | light-plus | monokai | solarized-dark | high-contrast");
-        Console.WriteLine("  -l, --line-numbers");
+        Console.WriteLine("  -l, --line-numbers, --no-line-numbers");
         Console.WriteLine("                 show the line-number gutter (Alt+N toggles it)");
+        Console.WriteLine("  --tab-width <n>");
+        Console.WriteLine($"                 tab stop every n columns, {Config.MinTabWidth}-{Config.MaxTabWidth} (default {TabStops.DefaultTabWidth})");
+        Console.WriteLine("  --mouse, --no-mouse");
+        Console.WriteLine("                 capture the mouse; off leaves the terminal its own");
+        Console.WriteLine("                 drag-select and copy");
+        Console.WriteLine("  --no-config    ignore config.toml");
         Console.WriteLine("  --probe        run the phase-1 terminal probe");
         Console.WriteLine("  --soak [dir] [passes]");
         Console.WriteLine("                 tokenizer soak test; not part of the editor");
@@ -135,6 +190,10 @@ internal static class Program
         Console.WriteLine("  -v, --version");
         Console.WriteLine();
         Console.WriteLine("A file that does not exist opens as a new, empty buffer under that name.");
+        Console.WriteLine();
+        Console.WriteLine($"config: {Config.DefaultPath}");
+        Console.WriteLine("        [editor] theme, tab_width, mouse, line_numbers.");
+        Console.WriteLine("        Optional; a flag above beats it. nib never writes this file.");
         Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
         Console.WriteLine("      Shift+move selects; Esc clears the selection; Ctrl+A select all;");
@@ -171,6 +230,30 @@ internal static class Program
 }
 
 /// <summary>
+/// What <see cref="Program.Parse"/> found on the command line. The four settings
+/// that <c>config.toml</c> also carries are nullable: null means "the flag was not
+/// passed", which is what lets the config file supply a value without a flag that
+/// defaults to the same thing overriding it.
+/// </summary>
+internal sealed class ParsedArgs
+{
+    public bool Probe { get; set; }
+    public bool Soak { get; set; }
+    public bool Help { get; set; }
+    public bool Version { get; set; }
+    public bool NoConfig { get; set; }
+
+    public string? File { get; set; }
+    public int StartLine { get; set; } // 0 = unset; nano's +LINE
+    public List<string> Positional { get; } = new();
+
+    public string? Theme { get; set; }
+    public int? TabWidth { get; set; }
+    public bool? Mouse { get; set; }
+    public bool? LineNumbers { get; set; }
+}
+
+/// <summary>
 /// Owns the interactive editing session: the render/input loop, the modal prompt
 /// and confirm lines, and save/quit. Everything editing-related lives in
 /// <see cref="TextBuffer"/>/<see cref="Cursor"/>; this class only wires them to the
@@ -199,13 +282,15 @@ internal sealed class Editor
         string? themeId,
         string? openingMessage = null,
         int startLine = 0,
-        bool lineNumbers = false)
+        bool lineNumbers = false,
+        int tabWidth = TabStops.DefaultTabWidth,
+        MessageKind openingKind = MessageKind.Info)
     {
         _host = host;
         _buffer = buffer;
         (int w, int h) = host.GetWindowSize();
         _screen = new Screen(w, h);
-        _viewport = new Viewport();
+        _viewport = new Viewport(tabWidth);
         _cursor = new Cursor(buffer, _viewport.TabWidth);
         _view = new EditorView(_screen, _viewport, buffer, _cursor);
         _commands = new EditorCommands(buffer, _cursor, new SystemClipboard());
@@ -223,8 +308,9 @@ internal sealed class Editor
         // conversation and silently doing the nearest sensible thing is nano's habit.
         if (startLine > 0) _commands.TryGoToLine(Math.Min(startLine, buffer.LineCount));
 
-        // Cleared by the next keystroke, which is the right lifetime for "New File".
-        _view.Message = openingMessage ?? "";
+        // Cleared by the next keystroke, which is the right lifetime for "New File"
+        // and for a config complaint the user will go and fix in another session.
+        _view.SetMessage(openingMessage ?? "", openingKind);
     }
 
     public void Run()

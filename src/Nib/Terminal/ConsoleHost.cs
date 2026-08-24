@@ -62,6 +62,43 @@ public sealed class ConsoleHost : IDisposable
         Out = new TerminalWriter(output);
     }
 
+    /// <summary>
+    /// The raw-mode input flags, derived from whatever the console arrived with.
+    /// Split out from <see cref="Acquire"/> so the mouse branch can be pinned by a
+    /// test — every other part of console setup needs a live console, this does not.
+    ///
+    /// Clearing ENABLE_PROCESSED_INPUT is what stops the console from eating Ctrl+C
+    /// as a break signal and lets it arrive as an ordinary key event.
+    ///
+    /// ENABLE_VIRTUAL_TERMINAL_INPUT is deliberately CLEARED. It converts keystrokes
+    /// into VT escape sequences delivered through ReadFile. We use ReadConsoleInputW
+    /// instead, which gives structured records with virtual key codes, modifier
+    /// state, resize events and mouse events — strictly more information than the
+    /// escape-sequence stream, and no parser needed.
+    ///
+    /// ENABLE_QUICK_EDIT_MODE must be cleared to receive mouse input, and it can only
+    /// be cleared if ENABLE_EXTENDED_FLAGS is set in the same call. That clear is
+    /// conditional on <paramref name="enableMouse"/>: with the mouse off, quick-edit
+    /// is left exactly as we found it, so <c>mouse = false</c> in config.toml buys the
+    /// user back the terminal's own drag-select-and-copy rather than turning off a
+    /// capability nothing is using yet. ENABLE_EXTENDED_FLAGS goes in either way —
+    /// it is what makes the quick-edit bit we are preserving mean anything.
+    /// </summary>
+    internal static uint InputMode(uint origIn, bool enableMouse)
+    {
+        uint clear = NativeMethods.ENABLE_PROCESSED_INPUT
+                   | NativeMethods.ENABLE_LINE_INPUT
+                   | NativeMethods.ENABLE_ECHO_INPUT
+                   | NativeMethods.ENABLE_VIRTUAL_TERMINAL_INPUT;
+        if (enableMouse) clear |= NativeMethods.ENABLE_QUICK_EDIT_MODE;
+
+        uint mode = (origIn & ~clear)
+                  | NativeMethods.ENABLE_EXTENDED_FLAGS
+                  | NativeMethods.ENABLE_WINDOW_INPUT;
+        if (enableMouse) mode |= NativeMethods.ENABLE_MOUSE_INPUT;
+        return mode;
+    }
+
     public static ConsoleHost Acquire(bool enableMouse = true)
     {
         if (!OperatingSystem.IsWindows())
@@ -91,26 +128,7 @@ public sealed class ConsoleHost : IDisposable
         if (!NativeMethods.GetConsoleMode(output, out uint origOut))
             throw new IOException("GetConsoleMode(CONOUT$) failed.");
 
-        // --- input: raw ------------------------------------------------------
-        // Clearing ENABLE_PROCESSED_INPUT is what stops the console from eating
-        // Ctrl+C as a break signal and lets it arrive as an ordinary key event.
-        //
-        // ENABLE_VIRTUAL_TERMINAL_INPUT is deliberately CLEARED. It converts
-        // keystrokes into VT escape sequences delivered through ReadFile. We use
-        // ReadConsoleInputW instead, which gives structured records with virtual
-        // key codes, modifier state, resize events and mouse events — strictly
-        // more information than the escape-sequence stream, and no parser needed.
-        //
-        // ENABLE_QUICK_EDIT_MODE must be cleared to receive mouse input, and it
-        // can only be cleared if ENABLE_EXTENDED_FLAGS is set in the same call.
-        uint newIn = origIn;
-        newIn &= ~(NativeMethods.ENABLE_PROCESSED_INPUT
-                 | NativeMethods.ENABLE_LINE_INPUT
-                 | NativeMethods.ENABLE_ECHO_INPUT
-                 | NativeMethods.ENABLE_QUICK_EDIT_MODE
-                 | NativeMethods.ENABLE_VIRTUAL_TERMINAL_INPUT);
-        newIn |= NativeMethods.ENABLE_EXTENDED_FLAGS | NativeMethods.ENABLE_WINDOW_INPUT;
-        if (enableMouse) newIn |= NativeMethods.ENABLE_MOUSE_INPUT;
+        uint newIn = InputMode(origIn, enableMouse);
 
         // --- output: VT ------------------------------------------------------
         // DISABLE_NEWLINE_AUTO_RETURN stops the console scrolling the whole
