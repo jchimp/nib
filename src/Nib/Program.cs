@@ -202,6 +202,7 @@ internal static class Program
         Console.WriteLine("      Ctrl+G go to line; Ctrl+H full keymap;");
         Console.WriteLine("      Ctrl+F find, F3 / Shift+F3 next / previous, Ctrl+R replace;");
         Console.WriteLine("      Alt+C case, Alt+W whole word, both inside the search prompt;");
+        Console.WriteLine("      Ctrl+W line / word / character count, for the selection or the file;");
         Console.WriteLine("      Alt+T cycle theme; Alt+N toggle line numbers.");
     }
 
@@ -357,6 +358,7 @@ internal sealed class Editor
                         case EditorAction.Replace: DoReplace(); break;
                         case EditorAction.FindNext: DoFindAgain(backwards: false); break;
                         case EditorAction.FindPrevious: DoFindAgain(backwards: true); break;
+                        case EditorAction.Stats: ShowStats(); break;
                     }
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -590,18 +592,31 @@ internal sealed class Editor
         }
     }
 
-    // nano-style line count: the trailing empty, unterminated line (from a file
-    // that ended with a newline) is not a line the user thinks of as written.
-    private int LinesWritten()
+    // ^W. Reports the selection when there is one and the whole buffer when there is
+    // not, which is the question you are actually asking in each case — nobody
+    // highlights a paragraph and then wants the file's total.
+    //
+    // A one-shot message rather than a permanent corner of the title row: the count
+    // is O(buffer) and the title row is redrawn every frame, so a persistent version
+    // would want a cache invalidated off LinesChanged to earn its place. This answers
+    // the same question for none of that.
+    private void ShowStats()
     {
-        int count = _buffer.LineCount;
-        if (count > 1)
-        {
-            Line last = _buffer.LineAt(count - 1);
-            if (last.Text.Length == 0 && last.Ending == LineEnding.None) count--;
-        }
-        return count;
+        bool selected = _commands.HasSelection;
+        TextStats stats = selected ? _commands.CountSelection() : TextStats.Of(_buffer);
+
+        _view.Message = (selected ? "Selected: " : "")
+            + $"{stats.Lines:N0} line{Plural(stats.Lines)}"
+            + $"   {stats.Words:N0} word{Plural(stats.Words)}"
+            + $"   {stats.Chars:N0} char{Plural(stats.Chars)}";
     }
+
+    private static string Plural(int count) => count == 1 ? "" : "s";
+
+    // nano-style line count: the trailing empty, unterminated line (from a file that
+    // ended with a newline) is not a line the user thinks of as written. Shared with
+    // ^W so the two can never report different totals for the same buffer.
+    private int LinesWritten() => TextStats.LineCount(_buffer);
 
     // Ctrl+X. Clean buffer quits immediately; a modified one asks first.
     private bool TryQuit()
