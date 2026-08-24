@@ -2,7 +2,7 @@
 
 ## Current Focus
 Phase 6 (polish). Phase 6c landed 2026-08-23 on `phase6-search`: search, replace-with-confirm, and the
-full `^H` keymap screen. 305 tests green. Nib has been in daily use at home and work on config and code
+full `^H` keymap screen, plus `^W` counts. 327 tests green. Nib has been in daily use at home and work on config and code
 files since the phase-5 build with no data loss and no console corruption, which discharges most of the
 interactive acceptance that was outstanding for phases 3-5 and ticks phase 6's own "two weeks of daily
 use". Next: mouse, then a final pass over the help screen once the mouse keys exist.
@@ -20,12 +20,44 @@ use". Next: mouse, then a final pass over the help screen once the mouse keys ex
 - [ ] Phase 6c hardware pass: `^F` then `F3` through a wrap and `Shift+F3` back out; `Alt+C`/`Alt+W`
       inside the prompt (the label badges change and so do the hits); a term that is not there reports in
       red with the caret unmoved; `^R` answering Y, N and then A, with one `^Z` undoing the whole A run;
-      `^H` at 80 columns and on a 24-row window
+      `^H` at 80 columns and on a 24-row window; `^W` with and without a selection
 - [ ] Phase 6b hardware pass, on the back of 6a: a config with all four keys non-default takes effect; `--theme` overrides it and `--no-config` ignores it; `mouse = false` gives the terminal its drag-select back and `mouse = true` takes it away; a corrupt line reports in red on the message row and the editor still opens
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
 ## Progress Log
+
+### 2026-08-23 (^W counts)
+
+- `^W` reports lines, words and characters — the selection's when there is one, the file's when there
+  is not. Cleared the last actionable item in `docs/private/JPC-TODO.md`.
+- The todo offered two designs ("top right corner, or Ctrl+W"). Took `^W`. A persistent corner count is
+  O(buffer) against a title row redrawn every frame, so it would want a cache invalidated off
+  `LinesChanged` to earn its place, plus `DrawTitle` reworked to right-align — it left-aligns and clips
+  the right edge today, which is exactly where the counts would have gone. The banner answers the same
+  question for none of that.
+- `Model/TextStats.cs`, console-free like the rest of `Model/`: `Of(TextBuffer)` and `Of(string)`, the
+  second for a span as `GetRange` hands it over.
+- **A word is a run of non-whitespace** — `wc -w`'s rule, nano's, and the one `Cursor.WordLeft`/
+  `WordRight` already use for `^arrow` movement. It deliberately disagrees with the whole-word *search*
+  boundary added an hour earlier, which counts letters, digits and underscore: `foo,bar` is one word to
+  move through and two to match. Both are right for what they do, and the divergence is commented at
+  both ends so neither reads as the other one's bug.
+- **Chars counts terminators**, so a CRLF line costs two. They are characters the file holds, and not
+  counting them under-reports every config file on this machine. It is a character count and not a byte
+  count; the two part company the moment a file is UTF-16.
+- `TextStats.LineCount` is now the single definition of the nano-style "trailing empty unterminated line
+  doesn't count" rule, and `Editor.LinesWritten` delegates to it. `^W` reporting 1,284 lines a keystroke
+  after `^S` said it wrote 1,283 is the sort of small disagreement that costs you trust in both numbers.
+- `^W` went on the help *screen* rather than the rows — the rows are at 75 and 69 columns against 80 and
+  have no room. It shares the Display line as a third column, so the page stayed at 22 lines against the
+  22 a 24-row window has.
+- Tests: 327 green (was 305). New `TextStatsTests` (the trailing-line rule in both directions including
+  the one-empty-line buffer it must not zero, CRLF as one line and two chars, a theory over the word
+  rule) plus selection-count cases in `EditorCommandsTests` — including the stale-anchor one, since the
+  count goes through the same clamping `SelectionRange` as everything else — and `^W` in `KeymapTests`
+  and `HelpScreenTests`.
+- Not verified here: the banner on a real console.
 
 ### 2026-08-23 (phase 6c — search, replace, help screen)
 
