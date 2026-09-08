@@ -147,7 +147,7 @@ $BuildDir = 'publish'
 $ExtraPayload = @(
     'README.md'
     'LICENSE'
-    'install.ps1'
+    'scripts/install.ps1'
     # 'config/'
 )
 
@@ -264,6 +264,48 @@ function Resolve-ReleaseBranch {
 
     $originHead = Get-GitOutput @('symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
     $script:ReleaseBranch = if ($originHead) { $originHead -replace '^origin/', '' } else { 'main' }
+}
+
+function Assert-ArtifactDirIgnored {
+    <#
+        The directory artifacts are written to has to be gitignored, or the
+        release dirties its own working tree: the zip lands there, git reports
+        it as untracked, and the clean-tree check in the tagging step then
+        refuses to tag - after the entire build has already run.
+
+        Enforced only when a tag is actually being created, since that is the
+        step it breaks. Otherwise it is a warning: building into a visible
+        directory is untidy, not wrong.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths,
+        [Parameter(Mandatory)][bool]$Soft
+    )
+
+    # Not a repo, so there is no .gitignore for anything to be missing from.
+    if (-not (Get-GitOutput @('rev-parse', '--git-dir'))) { return }
+
+    foreach ($path in $Paths) {
+        if (-not $path) { continue }
+
+        # check-ignore wants a repo-relative path.
+        $rel = $path
+        if ([System.IO.Path]::IsPathRooted($rel) -and
+            $rel.StartsWith($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $rel = $rel.Substring($RepoRoot.Length).TrimStart('\', '/')
+        }
+        if (-not $rel) { continue }
+
+        # Exit 0 and echoes the path when ignored; exit 1 and silent when not,
+        # which Get-GitOutput reports as $null.
+        if (Get-GitOutput @('check-ignore', $rel)) { continue }
+
+        $msg = ("$rel is not gitignored. The release writes artifacts there, which makes " +
+                "the working tree dirty, and -Tag then refuses to tag it - after the whole " +
+                "build has run. Add it:`n" +
+                "    Add-Content .gitignore '$rel/'")
+        if ($Soft) { Write-Warn "would fail: $msg" } else { throw $msg }
+    }
 }
 
 function Assert-ExtraPayload {
@@ -850,6 +892,10 @@ if ($PackageMode -eq 'artifacts' -and -not (Get-Command Get-ReleaseArtifacts -Er
            "Either set it to 'zip', or copy that function from the electron template - " +
            "artifacts mode needs it to decide which of the build's files are release assets.")
 }
+
+# Where artifacts land differs by mode, but either way it must be ignored.
+$artifactDir = if ($PackageMode -eq 'zip') { $OutDir } else { Join-Path $RepoRoot (Resolve-BuilderOutput) }
+Assert-ArtifactDirIgnored -Paths @($artifactDir) -Soft:($isDryRun -or -not $Tag)
 
 Assert-ExtraPayload
 if ($Publish) {
