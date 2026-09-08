@@ -266,6 +266,60 @@ function Resolve-ReleaseBranch {
     $script:ReleaseBranch = if ($originHead) { $originHead -replace '^origin/', '' } else { 'main' }
 }
 
+function ConvertTo-RepoRelativePath {
+    <# Strips the repo root off an absolute path. Anything else is returned as-is. #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ([System.IO.Path]::IsPathRooted($Path) -and
+        $Path.StartsWith($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Path.Substring($RepoRoot.Length).TrimStart('\', '/')
+    }
+    return $Path
+}
+
+function Get-GhAssetArguments {
+    <#
+        Turns asset paths into arguments gh will actually accept.
+
+        gh release create reads each asset as "path#label": everything after the
+        first '#' is a display label for the upload, and there is no escape for
+        a '#' that is part of the filename. So an artifact under a path like
+        C:\Users\me\Source\C#\myapp is silently cut down to C:\Users\me\Source\C
+        and gh reports it cannot find that file - after the tag is already
+        pushed, which is the worst possible moment.
+
+        gh runs with the repo root as its working directory, so passing
+        repo-relative paths keeps any '#' in the parent directories out of the
+        argument altogether.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Assets)
+
+    $ghArgs = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($asset in $Assets) {
+        $arg = ConvertTo-RepoRelativePath $asset
+
+        if ($arg.Contains('#')) {
+            throw ("Cannot upload $(Split-Path -Leaf $asset): the path gh would receive " +
+                   "('$arg') contains a '#', which gh reads as the start of an asset " +
+                   "display label rather than as part of the filename, and it has no " +
+                   "escape for that. Put the artifact directory somewhere without a '#' " +
+                   "in the name - -OutDir moves it.")
+        }
+
+        $ghArgs.Add($arg)
+    }
+
+    return $ghArgs.ToArray()
+}
+
+function Format-CommandArguments {
+    <# Quotes arguments containing spaces, so a printed command is paste-able. #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments)
+
+    return (($Arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) -join ' ')
+}
+
 function Assert-ArtifactDirIgnored {
     <#
         The directory artifacts are written to has to be gitignored, or the
@@ -289,11 +343,7 @@ function Assert-ArtifactDirIgnored {
         if (-not $path) { continue }
 
         # check-ignore wants a repo-relative path.
-        $rel = $path
-        if ([System.IO.Path]::IsPathRooted($rel) -and
-            $rel.StartsWith($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $rel = $rel.Substring($RepoRoot.Length).TrimStart('\', '/')
-        }
+        $rel = ConvertTo-RepoRelativePath $path
         if (-not $rel) { continue }
 
         # Exit 0 and echoes the path when ignored; exit 1 and silent when not,
@@ -334,11 +384,23 @@ function Assert-PublishReady {
         are not set up for yet. Problems accumulate rather than stopping at the
         first, so one rehearsal surfaces everything.
     #>
-    param([Parameter(Mandatory)][bool]$Soft)
+    param(
+        [Parameter(Mandatory)][bool]$Soft,
+        [Parameter(Mandatory)][string]$ArtifactDir
+    )
 
     Resolve-ReleaseBranch
 
     $problems = [System.Collections.Generic.List[string]]::new()
+
+    # Checked here, before the build, because the alternative is finding out
+    # after the tag has been pushed - see Get-GhAssetArguments.
+    $relArtifact = ConvertTo-RepoRelativePath $ArtifactDir
+    if ($relArtifact.Contains('#')) {
+        $problems.Add("Artifacts land in '$relArtifact', and gh reads a '#' in an asset path as " +
+                      "the start of a display label, with no way to escape it. Move the artifact " +
+                      "directory, or pass -OutDir to put it somewhere without a '#'.")
+    }
 
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         $problems.Add("-Publish needs the GitHub CLI. Install it, then run: gh auth login")
@@ -670,25 +732,77 @@ function Publish-Release {
     }
 
     Write-Note "pushing $TagName"
-    Invoke-Native -What "git push origin $TagName" -Command {
+    $pushExit = Invoke-Native -What "git push origin $TagName" -AllowFailure -Command {
         git -C $RepoRoot push origin $TagName
-    } | Out-Null
+    }
+    if ($pushExit -ne 0) {
+        throw ("Pushing the tag $TagName failed with exit code $pushExit. The tag exists " +
+               "locally but not on the remote, and no release was created - so nothing is " +
+               "half-published.`n" +
+               "Common causes: the tag is already on the remote (a previous release was " +
+               "deleted without --cleanup-tag), no push access, or a tag protection rule.`n" +
+               "  git ls-remote --tags origin $TagName   # is it already there?`n" +
+               "  git tag -d $TagName                    # drop the local tag and start over")
+    }
 
     Write-Note "creating GitHub release"
+    $releaseExists = $false
+
+    # Repo-relative, so a '#' anywhere above the repo root cannot be mistaken
+    # for gh's asset-label separator.
+    $ghAssets = Get-GhAssetArguments -Assets $Assets
+
     # gh resolves the repo from the git remote of its working directory, so run
-    # it there. (--repo takes OWNER/REPO, never a filesystem path.)
+    # it there. (--repo takes OWNER/REPO, never a filesystem path.) That working
+    # directory is also what the relative asset paths above are resolved against.
     Push-Location $RepoRoot
     try {
         $exit = Invoke-Native -What 'gh release create' -AllowFailure -Command {
-            gh release create $TagName @Assets --title $TagName --generate-notes
+            gh release create $TagName @ghAssets --title $TagName --generate-notes
+        }
+
+        if ($exit -ne 0) {
+            # Which recovery command to use depends on whether the release got
+            # created before the failure, so find out rather than guess: a
+            # release that exists cannot be created again, and telling someone
+            # to retry a command that is guaranteed to fail wastes their time.
+            $releaseExists = 0 -eq (Invoke-Native -What 'gh release view' -AllowFailure -Command {
+                gh release view $TagName *> $null
+            })
         }
     }
     finally { Pop-Location }
 
     if ($exit -ne 0) {
-        throw ("gh release create failed with exit code $exit. The tag is pushed, so " +
-               "fix the cause and finish with:`n" +
-               "  gh release create $TagName " + ($Assets -join ' ') + " --generate-notes")
+        $assetList = Format-CommandArguments -Arguments $ghAssets
+
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add("gh release create failed with exit code $exit.")
+        $lines.Add("The tag $TagName is already pushed and the artifacts are built, so")
+        $lines.Add('nothing needs redoing - only the upload has to be finished.')
+        $lines.Add('')
+        $lines.Add("Run from $RepoRoot")
+        $lines.Add('')
+
+        if ($releaseExists) {
+            $lines.Add("The release $TagName EXISTS - it was created before the failure, so")
+            $lines.Add('creating it again will fail. Finish the upload instead:')
+            $lines.Add("    gh release upload $TagName $assetList --clobber")
+        }
+        else {
+            $lines.Add('The release was not created. Retry it:')
+            $lines.Add("    gh release create $TagName $assetList --title $TagName --generate-notes")
+        }
+
+        $lines.Add('')
+        $lines.Add('Common causes: the gh token lost its workflow/repo scope (gh auth refresh),')
+        $lines.Add('an asset larger than 2 GB, or a release someone created on the web already.')
+        $lines.Add('')
+        $lines.Add('To back the whole release out instead:')
+        $lines.Add("    gh release delete $TagName --cleanup-tag --yes")
+        $lines.Add("    git tag -d $TagName")
+
+        throw ($lines -join "`n")
     }
 }
 
@@ -899,7 +1013,7 @@ Assert-ArtifactDirIgnored -Paths @($artifactDir) -Soft:($isDryRun -or -not $Tag)
 
 Assert-ExtraPayload
 if ($Publish) {
-    Assert-PublishReady -Soft:$isDryRun
+    Assert-PublishReady -Soft:$isDryRun -ArtifactDir $artifactDir
 }
 else {
     Write-Note "remote checks skipped (no -Publish)"
