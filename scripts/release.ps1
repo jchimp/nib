@@ -147,7 +147,7 @@ $BuildDir = 'publish'
 $ExtraPayload = @(
     'README.md'
     'LICENSE'
-    'scripts/install.ps1'
+    'install.ps1'
     # 'config/'
 )
 
