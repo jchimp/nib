@@ -2,6 +2,11 @@
 docs/private/
 *.local.md
 
+# Temp
+*.orig*
+*.bak*
+*.tmp*
+
 # Build output
 [Bb]in/
 [Oo]bj/
