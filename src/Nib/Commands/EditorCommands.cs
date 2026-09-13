@@ -48,6 +48,19 @@ public sealed class EditorCommands
     /// <summary>True when a non-empty selection exists (drives Ctrl+X = cut vs. quit).</summary>
     public bool HasSelection => _selection.IsActive(Cursor);
 
+    /// <summary>
+    /// config.toml's <c>auto_indent</c>: Enter carries the current line's leading
+    /// whitespace onto the new one. Off by default, as in nano.
+    /// </summary>
+    public bool AutoIndent { get; set; }
+
+    /// <summary>
+    /// config.toml's <c>tabs_to_spaces</c>: the Tab key inserts spaces up to the next
+    /// stop instead of a tab character. Off by default — a real tab is what a
+    /// Makefile or .gitconfig wants.
+    /// </summary>
+    public bool TabsToSpaces { get; set; }
+
     public EditorCommands(TextBuffer buffer, Cursor cursor, IClipboard clipboard, UndoStack? undo = null)
     {
         _buffer = buffer;
@@ -104,16 +117,45 @@ public sealed class EditorCommands
     public void Enter()
     {
         string newline = _buffer.DefaultEnding.ToChars();
+        TextPosition start, end;
         if (_selection.IsActive(Cursor))
         {
-            (TextPosition start, TextPosition end) = SelectionRange();
+            (start, end) = SelectionRange();
             _selection.Clear();
-            ApplyReplace(start, end, newline, coalesce: false);
         }
         else
         {
-            ApplyReplace(Caret, Caret, newline, coalesce: false); // a line break ends any typing run
+            start = end = Caret;
         }
+
+        // The indent rides in the same replace as the line break, so it is one undo
+        // step and one LinesChanged rather than two of each.
+        string text = AutoIndent ? newline + IndentToCarry(start) : newline;
+        ApplyReplace(start, end, text, coalesce: false); // a line break ends any typing run
+    }
+
+    // nano's rule: the leading whitespace of the line Enter lands on, but only as
+    // far as the caret has passed. Enter in the middle of the indent keeps what is
+    // to the left of the caret and lets the rest fall onto the new line as text.
+    private string IndentToCarry(TextPosition at)
+    {
+        string line = _buffer.GetLine(at.Row);
+        int n = 0;
+        while (n < at.Col && n < line.Length && (line[n] == ' ' || line[n] == '\t')) n++;
+        return line[..n];
+    }
+
+    /// <summary>The Tab key: a tab character, or with <see cref="TabsToSpaces"/> the
+    /// spaces that reach the next stop from where the text will land.</summary>
+    public void Tab()
+    {
+        if (!TabsToSpaces) { InsertChar('\t'); return; }
+
+        // Measured from the selection's start when there is one, because that is
+        // where the spaces end up once the selection is typed over.
+        TextPosition at = _selection.IsActive(Cursor) ? SelectionRange().Start : Caret;
+        int col = TabStops.CharToDisplayColumn(_buffer.GetLine(at.Row), at.Col, Cursor.TabWidth);
+        TypeText(new string(' ', TabStops.NextTabStop(col, Cursor.TabWidth) - col));
     }
 
     public void Backspace()
