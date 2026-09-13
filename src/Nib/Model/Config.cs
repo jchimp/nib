@@ -2,8 +2,8 @@ namespace Nib.Model;
 
 /// <summary>
 /// The settings read from <c>%APPDATA%\nib\config.toml</c>: theme, tab width,
-/// mouse, and the line-number gutter. Four keys, no schema, no writer — nib reads
-/// this file and never creates it.
+/// mouse, the line-number gutter, auto-indent and tabs-to-spaces. Six keys, no
+/// schema, no writer — nib reads this file and never creates it.
 ///
 /// Lives in <c>Model/</c> because it is console-free by construction, which is what
 /// lets the parser and its error cases be tested without a terminal. It is also why
@@ -39,6 +39,13 @@ public sealed record Config
     public bool Mouse { get; init; }
 
     public bool LineNumbers { get; init; }
+
+    /// <summary>Enter carries the current line's indent. Off, as in nano.</summary>
+    public bool AutoIndent { get; init; }
+
+    /// <summary>Tab inserts spaces to the next stop. Off: a real tab is what
+    /// Makefiles and .gitconfig want, and that is the kind of file this edits.</summary>
+    public bool TabsToSpaces { get; init; }
 
     public static Config Default { get; } = new();
 
@@ -154,6 +161,20 @@ public sealed record Config
                         found.Add($"line {lineNo}: line_numbers must be true or false");
                     else
                         config = config with { LineNumbers = gutter };
+                    break;
+
+                case "auto_indent":
+                    if (!TryBool(value, out bool indent))
+                        found.Add($"line {lineNo}: auto_indent must be true or false");
+                    else
+                        config = config with { AutoIndent = indent };
+                    break;
+
+                case "tabs_to_spaces":
+                    if (!TryBool(value, out bool spaces))
+                        found.Add($"line {lineNo}: tabs_to_spaces must be true or false");
+                    else
+                        config = config with { TabsToSpaces = spaces };
                     break;
 
                 default:
