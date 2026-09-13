@@ -3,7 +3,7 @@
 ## Current Focus
 Phase 6 (polish). 6a/6b/6c all landed 2026-08-23; a senior review pass over 0.6.2 the same day found and
 fixed a real rendering bug (tabs painted over the line-number gutter) and turned the mouse capture off by
-default, since the loop discards every mouse event until phase 6's mouse work. 352 tests green. Next is
+default, since the loop discards every mouse event until phase 6's mouse work. 371 tests green. Next is
 still mouse, then the help-screen pass once the mouse keys exist; the rest of the review's findings are
 queued below in rough impact/effort order.
 
@@ -42,6 +42,19 @@ are checked so the list stays a record of the whole pass rather than only what i
 
 ## Progress Log
 
+### 2026-09-12 (Save As fix, auto_indent, tabs_to_spaces)
+
+- **`^O` overwrote instead of prompting.** `Keymap` mapped `^S` and `^O` to the same `EditorAction.Save`,
+  and `DoSave` only prompts on a pathless buffer. New `EditorAction.SaveAs` → `DoSaveAs()`: always prompts,
+  pre-filled with the current path, asks before writing over a *different* existing file, then goes through
+  the shared `WriteTo()`. `FileIo.Save` already rebinds `buffer.Path`, so the title and the next `^S` follow.
+- `auto_indent` (config key, default false, nano's default): Enter carries the leading whitespace left of the
+  caret in the same `ApplyReplace` as the line break — one undo step. `EditorCommands.IndentToCarry`.
+- `tabs_to_spaces` (config key, default false): `EditorCommands.Tab()` inserts spaces to the next stop,
+  measured from the selection start when there is one, using the new `Cursor.TabWidth`. `Keymap`'s Tab
+  case routes through it. Existing tabs in the file are untouched.
+- Neither new key has a CLI flag; config-only. 371 tests.
+
 ### 2026-08-23 (review pass — gutter, mouse default, Ui rename)
 
 - Senior review over 0.6.2, written to `.review/2026-08-23/`. No criticals; three high, seven medium,
@@ -60,7 +73,7 @@ are checked so the list stays a record of the whole pass rather than only what i
 - Four `ConfigTests` fixtures flipped to `mouse = true`: with the default now false, `mouse = false` as a
   test *input* asserts nothing, and one of those tests states in its own comment that every unnamed key is
   set to a non-default.
-- `src/Nib/UI` → `src/Nib/Ui` (case-only, via a temp name). 352 tests green, build still 0 warnings.
+- `src/Nib/UI` → `src/Nib/Ui` (case-only, via a temp name). 371 tests green, build still 0 warnings.
 - Next: unchanged — mouse. The remaining findings are in Open Todos above; M-2 and M-3 are the cheap ones
   and neither touches editor code.
 
