@@ -23,3 +23,11 @@ mouse = false
 
 # The line-number gutter. Alt+N toggles it for the session.
 line_numbers = false
+
+# Enter carries the current line's leading whitespace onto the new line,
+# like nano's `set autoindent`. Only the indent left of the caret is copied.
+auto_indent = false
+
+# The Tab key inserts spaces up to the next tab_width stop instead of a tab
+# character. Tabs already in the file are left alone either way.
+tabs_to_spaces = false
