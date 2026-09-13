@@ -394,7 +394,7 @@ that ever changes.
 
 ## Configuration (phase 6b)
 
-`%APPDATA%\nib\config.toml`, four keys, no schema:
+`%APPDATA%\nib\config.toml`, six keys, no schema:
 
 ```toml
 [editor]
@@ -402,6 +402,8 @@ theme = "dark-plus"
 tab_width = 8
 mouse = false
 line_numbers = false
+auto_indent = false
+tabs_to_spaces = false
 ```
 
 **Precedence is command line > config file > default**, and the thing that makes
@@ -423,6 +425,22 @@ divides by zero in `TabStops.NextTabStop`. An unknown theme resolves to null in
 "no match" with nobody left to report it.
 
 Nib never writes this file. There is no `--write-config` and no directory creation.
+
+`auto_indent` and `tabs_to_spaces` are config-only — no CLI flag, so no nullable on
+`ParsedArgs` for them. Both live on `EditorCommands` as plain settable bools so the
+tests set them after construction. Auto-indent copies only the whitespace left of
+the caret (nano's rule) and rides in the *same* `ApplyReplace` as the line break, so
+it is one undo step. Tabs-to-spaces measures from the selection start when there is
+one, because that is where the spaces land once the selection is typed over; it uses
+`Cursor.TabWidth` so the caret and the expansion can never disagree about the stop.
+
+**`^O` is Save As and must always prompt.** It shared `EditorAction.Save` with `^S`
+until 2026-09-12, and `DoSave` only prompts on a pathless buffer — so on any real
+file `^O` silently overwrote. `KeymapTests` pins the two actions apart. Save As
+pre-fills the current path, asks before writing over a *different* existing file,
+and relies on `FileIo.Save` rebinding `buffer.Path` so the title and the next `^S`
+follow the new name. The highlighter is not re-detected after a rename to another
+extension; reopening is 150 ms and that is the fix.
 
 ## Search and replace (phase 6c)
 
