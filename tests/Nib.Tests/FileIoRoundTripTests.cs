@@ -122,6 +122,64 @@ public class FileIoRoundTripTests
     }
 
     [Fact]
+    public void A_regular_file_resolves_to_itself()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nib-plain-{Guid.NewGuid():N}.txt");
+        File.WriteAllBytes(path, "x\n"u8.ToArray());
+        try
+        {
+            Assert.Equal(Path.GetFullPath(path), FileIo.ResolveLinkTarget(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    // ReplaceFile refuses a reparse point (Win32 1464), which is how `nib ~\.claude\CLAUDE.md`
+    // — a symlink into a dotfiles checkout — could load and not save. The write has to go
+    // through the link to its target and leave the link standing.
+    //
+    // Creating a file symlink on Windows needs Developer Mode or elevation, and xunit 2
+    // has no runtime skip. When the link cannot be made this test returns early and
+    // counts as passed, which it is not: it is "could not run here". The hardware pass
+    // against the real CLAUDE.md is the verification that counts.
+    [Fact]
+    public void Saving_through_a_symlink_writes_the_target_and_keeps_the_link()
+    {
+        string target = Path.Combine(Path.GetTempPath(), $"nib-target-{Guid.NewGuid():N}.txt");
+        string link = Path.Combine(Path.GetTempPath(), $"nib-link-{Guid.NewGuid():N}.txt");
+        File.WriteAllBytes(target, "before\n"u8.ToArray());
+        try
+        {
+            try
+            {
+                File.CreateSymbolicLink(link, target);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                return; // no privilege to create links on this machine — see the comment above
+            }
+
+            TextBuffer buffer = FileIo.Load(link);
+            buffer.InsertText(0, 0, "after ");
+            FileIo.Save(buffer, link);
+
+            Assert.Equal("after before\n"u8.ToArray(), File.ReadAllBytes(target));
+            FileSystemInfo? resolved = new FileInfo(link).ResolveLinkTarget(returnFinalTarget: false);
+            Assert.NotNull(resolved);
+            Assert.Equal(Path.GetFullPath(target), resolved!.FullName);
+            Assert.Equal(link, buffer.Path);
+            Assert.False(buffer.IsModified);
+        }
+        finally
+        {
+            if (File.Exists(link)) File.Delete(link);
+            File.Delete(target);
+        }
+    }
+
+    [Fact]
     public void Detected_encoding_labels_are_reported()
     {
         string src = Path.Combine(Path.GetTempPath(), $"nib-enc-{Guid.NewGuid():N}.txt");
