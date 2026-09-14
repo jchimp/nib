@@ -3,7 +3,7 @@
 ## Current Focus
 Phase 6 (polish). 6a/6b/6c all landed 2026-08-23; a senior review pass over 0.6.2 the same day found and
 fixed a real rendering bug (tabs painted over the line-number gutter) and turned the mouse capture off by
-default, since the loop discards every mouse event until phase 6's mouse work. 371 tests green. Next is
+default, since the loop discards every mouse event until phase 6's mouse work. 373 tests green. Next is
 still mouse, then the help-screen pass once the mouse keys exist; the rest of the review's findings are
 queued below in rough impact/effort order.
 
@@ -41,6 +41,14 @@ are checked so the list stays a record of the whole pass rather than only what i
 - [ ] **L-3** A line clipped at the right edge loses its trailing selection cell
 
 ## Progress Log
+
+### 2026-09-13 (save through a symlink)
+
+- `nib ~\.claude\CLAUDE.md` loaded but would not save: Win32 1464 from `ReplaceFile`, which refuses a
+  reparse point. `FileIo.Save` now resolves the link (`ResolveLinkTarget`, final target) and does the
+  temp-and-replace in the *target's* directory; the link stands and `buffer.Path` stays as typed.
+- The symlink unit test soft-skips without link privilege; verified instead by a no-edit round trip
+  through the real link (bytes identical, link intact, no temp left). 373 tests.
 
 ### 2026-09-12 (Save As fix, auto_indent, tabs_to_spaces)
 
