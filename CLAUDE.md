@@ -228,6 +228,22 @@ layout.
 when we write the bottom-right cell — which a full-screen renderer does on every
 frame.
 
+**`ReplaceFile` refuses a symlink.** Win32 error 1464, "This application does not
+support the current operation on symbolic links", is what `File.Replace` throws when the
+file being replaced is a reparse point. `~\.claude\CLAUDE.md` is a symlink into a
+dotfiles checkout, so it loaded and would not save. `FileIo.Save` resolves the link to
+its final target (`FileIo.ResolveLinkTarget`) and does the temp-and-replace *there*, so
+the link stands and the checkout sees a normal edit. Two things about it are
+load-bearing: the temp file goes in the **target's** directory, because link and target
+need not share a volume and a cross-volume replace is a copy; and `buffer.Path` stays
+the path the user typed, so the title row says what they opened. Do not "fix" this by
+deleting the link and writing a plain file in its place — that silently detaches the
+dotfiles setup, which is worse than the error was.
+
+The unit test for this soft-skips when it cannot create a link (Developer Mode or
+elevation is needed on Windows, and xunit 2 has no runtime skip), so a green run does
+not prove it. Verify against the real `~\.claude\CLAUDE.md`.
+
 **Clipboard ownership transfers on success.** After `SetClipboardData` returns
 non-zero, the system owns the `GlobalAlloc` block. Freeing it is a use-after-free
 for every other application on the machine.
