@@ -48,18 +48,27 @@ public static class FileIo
             output = body;
         }
 
-        // Same directory so File.Replace stays on one volume (a cross-volume
-        // replace is a copy, which defeats atomicity).
-        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
-        string temp = Path.Combine(dir, $".{Path.GetFileName(path)}.nib-tmp");
+        // A symlink is written *through*, not replaced: ReplaceFile refuses a reparse
+        // point (Win32 1464, "does not support the current operation on symbolic
+        // links"), and swapping the link for a plain file would quietly detach a
+        // dotfiles checkout. So the temp-and-replace happens at the final target.
+        string target = ResolveLinkTarget(path);
+
+        // Same directory as the *target* so File.Replace stays on one volume (a
+        // cross-volume replace is a copy, which defeats atomicity). The link and its
+        // target need not share a volume, so this cannot be derived from `path`.
+        string dir = Path.GetDirectoryName(target) ?? ".";
+        string temp = Path.Combine(dir, $".{Path.GetFileName(target)}.nib-tmp");
 
         File.WriteAllBytes(temp, output);
         try
         {
-            if (File.Exists(path))
-                File.Replace(temp, path, destinationBackupFileName: null);
+            // A dangling link takes the Move branch and creates its target, which is
+            // what writing through a link means.
+            if (File.Exists(target))
+                File.Replace(temp, target, destinationBackupFileName: null);
             else
-                File.Move(temp, path);
+                File.Move(temp, target);
         }
         catch
         {
@@ -68,8 +77,31 @@ public static class FileIo
             throw;
         }
 
+        // The path the user typed, not the target: the title row should keep saying
+        // what they opened, and the next save resolves again (one stat).
         buffer.Path = path;
         buffer.MarkSaved();
+    }
+
+    /// <summary>
+    /// Where a write to <paramref name="path"/> actually lands: the end of a chain of
+    /// symlinks, or the path itself for a regular file. Public so the test for the
+    /// no-link case can run on a machine that cannot create links.
+    /// </summary>
+    public static string ResolveLinkTarget(string path)
+    {
+        string full = Path.GetFullPath(path);
+        try
+        {
+            // Null for anything that is not a link. An unusual reparse point (a cloud
+            // placeholder, say) that cannot be resolved falls back to the plain path
+            // and reports whatever Replace says about it, as it did before.
+            return new FileInfo(full).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? full;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return full;
+        }
     }
 
     // BOM sniffing. UTF-32 LE (FF FE 00 00) must be checked before UTF-16 LE
