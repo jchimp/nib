@@ -236,6 +236,31 @@ public sealed class EditorCommands
     }
 
     /// <summary>
+    /// Double-click: select the word under <paramref name="at"/>, by the same
+    /// whitespace-delimited rule <see cref="Cursor.WordLeft"/> uses for ^arrow â€” a
+    /// double-click and ^Shift+Right should agree about what a word is. On
+    /// whitespace or past the end of the line there is no word; the caret just
+    /// lands there with the selection cleared.
+    /// </summary>
+    public void SelectWordAt(TextPosition at)
+    {
+        int row = Math.Clamp(at.Row, 0, _buffer.LineCount - 1);
+        string text = _buffer.GetLine(row);
+        int col = Math.Clamp(at.Col, 0, text.Length);
+        if (col >= text.Length || char.IsWhiteSpace(text[col]))
+        {
+            Move(() => Cursor.MoveTo(row, col), extend: false);
+            return;
+        }
+        int start = col;
+        while (start > 0 && !char.IsWhiteSpace(text[start - 1])) start--;
+        int end = col;
+        while (end < text.Length && !char.IsWhiteSpace(text[end])) end++;
+        SelectRange(new TextPosition(row, start), new TextPosition(row, end));
+    }
+
+
+    /// <summary>
     /// Lines, words and characters for the selection — what ^W reports when there is
     /// one. Zeroes when there is not, so the caller checks
     /// <see cref="HasSelection"/> rather than reading meaning into an empty count.
