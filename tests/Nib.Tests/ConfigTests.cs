@@ -49,7 +49,8 @@ public class ConfigTests
     {
         Assert.Null(Config.Default.Theme);
         Assert.Equal(TabStops.DefaultTabWidth, Config.Default.TabWidth);
-        Assert.False(Config.Default.Mouse);
+        Assert.True(Config.Default.Mouse); // on since phase 6d: the loop consumes clicks now
+
         Assert.False(Config.Default.LineNumbers);
         Assert.False(Config.Default.AutoIndent);   // nano's default too
         Assert.False(Config.Default.TabsToSpaces); // a real tab is what Makefiles want
