@@ -55,6 +55,8 @@ internal static class NativeMethods
     // ---- Mouse ---------------------------------------------------------------
     internal const uint FROM_LEFT_1ST_BUTTON_PRESSED = 0x0001;
     internal const uint RIGHTMOST_BUTTON_PRESSED = 0x0002;
+    internal const uint FROM_LEFT_2ND_BUTTON_PRESSED = 0x0004;
+
     internal const uint MOUSE_MOVED = 0x0001;
     internal const uint DOUBLE_CLICK = 0x0002;
     internal const uint MOUSE_WHEELED = 0x0004;
