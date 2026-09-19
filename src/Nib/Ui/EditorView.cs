@@ -429,4 +429,38 @@ public sealed class EditorView
         CursorX = Math.Clamp(x, gutter, Math.Max(gutter, _screen.Width - 1));
         CursorY = Math.Clamp(y, 1, Math.Max(1, TextRows));
     }
+
+    /// <summary>Whether screen row <paramref name="y"/> is one of the text rows.</summary>
+    public bool IsTextRow(int y) => y >= 1 && y <= TextRows;
+
+    /// <summary>
+    /// The buffer position a click on screen cell (<paramref name="x"/>, <paramref name="y"/>)
+    /// means â€” the inverse of <see cref="PlaceCursor"/>. Null when the row is not a
+    /// text row (title, message, help). Within a text row nothing fails: the gutter
+    /// maps to column 0, past end of line to the line's end, and below the last
+    /// line to the last line, which is where nano puts a click there too.
+    /// </summary>
+    public TextPosition? HitTest(int x, int y)
+    {
+        if (!IsTextRow(y)) return null;
+        return HitTextRow(x, y);
+    }
+
+    /// <summary>
+    /// <see cref="HitTest"/> with the row clamped into the text area first, for a
+    /// drag that has left the window: the selection should keep growing toward the
+    /// edge the pointer went past, not freeze at the last cell it was over.
+    /// </summary>
+    public TextPosition HitTestClamped(int x, int y) =>
+        HitTextRow(x, Math.Clamp(y, 1, Math.Max(1, TextRows)));
+
+    private TextPosition HitTextRow(int x, int y)
+    {
+        int row = Math.Min(_viewport.FirstLine + (y - 1), _buffer.LineCount - 1);
+        int gutter = GutterWidth;
+        int displayCol = _viewport.FirstColumn + Math.Max(0, x - gutter);
+        int col = _viewport.DisplayToCharColumn(_buffer.GetLine(row), displayCol);
+        return new TextPosition(row, col);
+    }
 }
+
