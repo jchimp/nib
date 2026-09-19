@@ -53,9 +53,9 @@ public class ConsoleInputModeTests
     [Fact]
     public void Mouse_off_leaves_quick_edit_exactly_as_it_found_it()
     {
-        // This is what makes `mouse = false` in config.toml worth having today: the
-        // editor does not consume mouse events yet, so the observable difference is
-        // whether the terminal keeps its own drag-select-and-copy.
+        // This is what `mouse = false` in config.toml buys: the terminal keeps its
+        // own drag-select-and-copy, for anyone who prefers that to nib's.
+
         uint on = ConsoleHost.InputMode(Typical, enableMouse: false);
         Assert.Equal(NativeMethods.ENABLE_QUICK_EDIT_MODE, on & NativeMethods.ENABLE_QUICK_EDIT_MODE);
         Assert.Equal(0u, on & NativeMethods.ENABLE_MOUSE_INPUT);
