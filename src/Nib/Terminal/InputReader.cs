@@ -163,8 +163,11 @@ public sealed class InputReader
         return true;
     }
 
-    private static InputEvent DecodeMouse(in NativeMethods.MOUSE_EVENT_RECORD m)
+    // Internal rather than private so the decode can be tested against hand-built
+    // records; ReadBatch itself needs a live CONIN$ and cannot be.
+    internal static InputEvent DecodeMouse(in NativeMethods.MOUSE_EVENT_RECORD m)
     {
+
         MouseAction action;
         int wheel = 0;
 
@@ -190,6 +193,15 @@ public sealed class InputReader
             action = m.dwButtonState != 0 ? MouseAction.ButtonDown : MouseAction.ButtonUp;
         }
 
+        // Low bits of dwButtonState, on every event. The same layout as our enum,
+        // which is not a coincidence â€” the constants below spell it out. A drag is
+        // MOUSE_MOVED with Left still set; Windows never repeats the press.
+        MouseButtons buttons = MouseButtons.None;
+        if ((m.dwButtonState & NativeMethods.FROM_LEFT_1ST_BUTTON_PRESSED) != 0) buttons |= MouseButtons.Left;
+        if ((m.dwButtonState & NativeMethods.RIGHTMOST_BUTTON_PRESSED) != 0) buttons |= MouseButtons.Right;
+        if ((m.dwButtonState & NativeMethods.FROM_LEFT_2ND_BUTTON_PRESSED) != 0) buttons |= MouseButtons.Middle;
+
+
         KeyModifiers mods = KeyModifiers.None;
         if ((m.dwControlKeyState & NativeMethods.SHIFT_PRESSED) != 0) mods |= KeyModifiers.Shift;
         if ((m.dwControlKeyState & (NativeMethods.LEFT_CTRL_PRESSED | NativeMethods.RIGHT_CTRL_PRESSED)) != 0)
@@ -204,7 +216,9 @@ public sealed class InputReader
             MouseX = m.dwMousePosition.X,
             MouseY = m.dwMousePosition.Y,
             WheelDelta = wheel,
+            Buttons = buttons,
             Modifiers = mods,
         };
     }
 }
+
