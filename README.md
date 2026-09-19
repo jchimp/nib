@@ -61,8 +61,9 @@ if it isn't there you get the defaults shown.
 [editor]
 theme = "dark-plus"
 tab_width = 8
-mouse = false
+mouse = true
 line_numbers = false
+
 auto_indent = false
 tabs_to_spaces = false
 ```
@@ -77,9 +78,11 @@ spaces up to the next `tab_width` stop instead of a tab character. Both are off 
 default: a Makefile or `.gitconfig` wants a real tab, and nib never rewrites the
 tabs a file already has either way.
 
-`mouse` is off by default, which leaves the terminal its own drag-select-and-copy.
-Turning it on hands those events to nib instead, and nib does not yet do anything
-with them — so it is off until clicks position the caret.
+`mouse` is on by default: click places the caret, drag selects, Shift+click extends,
+double-click selects a word, the wheel scrolls without moving the caret, and
+right-click pastes. `mouse = false` (or `--no-mouse`) hands the terminal back its own
+drag-select-and-copy instead.
+
 
 | Keys | |
 |---|---|
@@ -99,6 +102,10 @@ with them — so it is off until clicks position the caret.
 | Ctrl+H | Help |
 | Alt+T | Cycle theme |
 | Alt+N | Toggle line numbers |
+| Click / drag / double-click | Place the caret / select / select a word |
+| Wheel | Scroll (the caret stays put; the next key brings the view back) |
+| Right-click | Paste |
+
 
 Ctrl+Q is the exit key; Ctrl+X keeps nano's context-dependent meaning so both
 habits work. Copying collapses the selection rather than leaving it painted.
