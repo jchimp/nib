@@ -11,6 +11,7 @@ public enum EditorAction
 {
     None,
     Save,
+    SaveAs,
     Quit,
     Help,
     GoToLine,
@@ -57,8 +58,11 @@ public static class Keymap
         {
             switch (ev.Key)
             {
-                case ConsoleKey.S:
-                case ConsoleKey.O: return EditorAction.Save;
+                case ConsoleKey.S: return EditorAction.Save;
+                // nano's ^O is "write out", which prompts for the name every time. It
+                // shared Save's action here, so on a file with a path it silently
+                // overwrote — the one thing a Save-as key must never do.
+                case ConsoleKey.O: return EditorAction.SaveAs;
 
                 case ConsoleKey.G: return EditorAction.GoToLine;
 
@@ -118,7 +122,7 @@ public static class Keymap
             case ConsoleKey.Enter: cmd.Enter(); return EditorAction.None;
             case ConsoleKey.Backspace: cmd.Backspace(); return EditorAction.None;
             case ConsoleKey.Delete: cmd.Delete(); return EditorAction.None;
-            case ConsoleKey.Tab: cmd.InsertChar('\t'); return EditorAction.None;
+            case ConsoleKey.Tab: cmd.Tab(); return EditorAction.None;
 
             // Search again, without a prompt and without spending a Ctrl chord.
             // InputReader casts wVirtualKeyCode straight to ConsoleKey, so VK_F3

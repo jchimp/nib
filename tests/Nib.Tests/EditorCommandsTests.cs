@@ -586,4 +586,120 @@ public class EditorCommandsTests
         Assert.Equal(new TextPosition(0, 17), scope.End);
         Assert.NotEqual(scope, cmd.CurrentSelection()!.Value); // the search did move it
     }
+
+
+    // ---- auto_indent ---------------------------------------------------------
+
+    [Fact]
+    public void Enter_carries_no_indent_by_default()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("\tfoo");
+        cur.MoveTo(0, 4);
+        cmd.Enter();
+        Assert.Equal("", buf.GetLine(1));
+    }
+
+    [Theory]
+    [InlineData("\tfoo", "\t")]
+    [InlineData("    foo", "    ")]
+    [InlineData("\t  foo", "\t  ")]
+    [InlineData("   ", "   ")]   // a whitespace-only line carries all of it
+    [InlineData("foo", "")]
+    public void Enter_at_end_of_line_carries_the_leading_whitespace(string line, string indent)
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup(line);
+        cmd.AutoIndent = true;
+        cur.MoveTo(0, line.Length);
+        cmd.Enter();
+
+        Assert.Equal(line, buf.GetLine(0));
+        Assert.Equal(indent, buf.GetLine(1));
+        Assert.Equal(new TextPosition(1, indent.Length), new TextPosition(cur.Row, cur.Col));
+    }
+
+    // nano's rule: only the indent the caret has passed is copied. The rest falls
+    // onto the new line as ordinary text, which is what splitting a line means.
+    [Fact]
+    public void Enter_inside_the_indent_carries_only_what_is_left_of_the_caret()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("\t\tfoo");
+        cmd.AutoIndent = true;
+        cur.MoveTo(0, 1);
+        cmd.Enter();
+
+        Assert.Equal("\t", buf.GetLine(0));
+        Assert.Equal("\t\tfoo", buf.GetLine(1));
+        Assert.Equal(new TextPosition(1, 1), new TextPosition(cur.Row, cur.Col));
+    }
+
+    [Fact]
+    public void Enter_over_a_selection_uses_the_selection_start_row_indent()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("  first", "\tsecond");
+        cmd.AutoIndent = true;
+        Select(cmd, cur, 0, 4, 1, 3);
+        cmd.Enter();
+
+        Assert.Equal("  fi", buf.GetLine(0));
+        Assert.Equal("  cond", buf.GetLine(1)); // col 3 of "	second" is past the "se"
+        Assert.False(cmd.HasSelection);
+    }
+
+    [Fact]
+    public void Auto_indent_is_one_undo_step_with_the_line_break()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("\tfoo");
+        cmd.AutoIndent = true;
+        cur.MoveTo(0, 4);
+        cmd.Enter();
+        Assert.Equal(2, buf.LineCount);
+
+        Assert.True(cmd.Undo());
+        Assert.Equal(1, buf.LineCount);
+        Assert.Equal("\tfoo", buf.GetLine(0));
+        Assert.Equal(new TextPosition(0, 4), new TextPosition(cur.Row, cur.Col));
+    }
+
+    // ---- tabs_to_spaces ------------------------------------------------------
+
+    [Fact]
+    public void Tab_inserts_a_tab_character_by_default()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("ab");
+        cmd.Cursor.MoveTo(0, 2);
+        cmd.Tab();
+        Assert.Equal("ab\t", buf.GetLine(0));
+    }
+
+    [Theory]
+    [InlineData(4, "", 4)]
+    [InlineData(4, "abc", 1)]
+    [InlineData(4, "abcd", 4)]
+    [InlineData(8, "abcde", 3)]
+    [InlineData(4, "\tab", 2)]   // measured in display columns, past the real tab
+    public void Tab_with_tabs_to_spaces_reaches_the_next_stop(int width, string prefix, int spaces)
+    {
+        var buffer = new TextBuffer([new Line(prefix, LineEnding.None)], DocumentEncoding.Utf8NoBom, null);
+        var cursor = new Cursor(buffer, width);
+        var cmd = new EditorCommands(buffer, cursor, new FakeClipboard()) { TabsToSpaces = true };
+        cursor.MoveTo(0, prefix.Length);
+
+        cmd.Tab();
+
+        Assert.Equal(prefix + new string(' ', spaces), buffer.GetLine(0));
+        Assert.Equal(prefix.Length + spaces, cursor.Col);
+    }
+
+    [Fact]
+    public void Tab_with_tabs_to_spaces_over_a_selection_measures_from_its_start()
+    {
+        (EditorCommands cmd, TextBuffer buf, Cursor cur, _) = Setup("abcdefgh");
+        cmd.TabsToSpaces = true;
+        Select(cmd, cur, 0, 3, 0, 7);
+        cmd.Tab();
+
+        // Column 3 with width 8: five spaces to the stop, then the surviving 'h'.
+        Assert.Equal("abc     h", buf.GetLine(0));
+        Assert.False(cmd.HasSelection);
+    }
 }

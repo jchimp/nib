@@ -40,8 +40,9 @@ public static class HelpScreen
         "  Arrows  Home  End  PgUp  PgDn        ^Home / ^End  Start / end of file",
         "  ^Left / ^Right  A word at a time     ^G  Go to line",
         "  Shift with any movement key extends the selection; Esc clears it",
-        "",
+        "  Click places the caret, drag selects, wheel scrolls   Right-click pastes",
         "Display and counts",
+
         "  Alt+T  Cycle theme       Alt+N  Line numbers       ^W  Word count",
     };
 }

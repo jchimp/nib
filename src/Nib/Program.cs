@@ -111,7 +111,8 @@ internal static class Program
             if (probe) Probe.Run(host);
             else new Editor(
                 host, buffer!, theme, openingMessage, cli.StartLine, lineNumbers, tabWidth,
-                configProblem is null ? MessageKind.Info : MessageKind.Error).Run();
+                configProblem is null ? MessageKind.Info : MessageKind.Error,
+                config.AutoIndent, config.TabsToSpaces).Run();
             return 0;
         }
         finally
@@ -192,13 +193,14 @@ internal static class Program
         Console.WriteLine("A file that does not exist opens as a new, empty buffer under that name.");
         Console.WriteLine();
         Console.WriteLine($"config: {Config.DefaultPath}");
-        Console.WriteLine("        [editor] theme, tab_width, mouse, line_numbers.");
+        Console.WriteLine("        [editor] theme, tab_width, mouse, line_numbers, auto_indent,");
+        Console.WriteLine("        tabs_to_spaces.");
         Console.WriteLine("        Optional; a flag above beats it. nib never writes this file.");
         Console.WriteLine();
         Console.WriteLine("keys: arrows / Home / End / PgUp / PgDn move; Ctrl+arrows by word;");
         Console.WriteLine("      Shift+move selects; Esc clears the selection; Ctrl+A select all;");
         Console.WriteLine("      Ctrl+C/X/V copy/cut/paste; Ctrl+K/U cut/paste line; Ctrl+Z/Y undo/redo;");
-        Console.WriteLine("      Ctrl+S or Ctrl+O save; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
+        Console.WriteLine("      Ctrl+S save; Ctrl+O save as; Ctrl+Q quit; Ctrl+X cut, or quit with no selection;");
         Console.WriteLine("      Ctrl+G go to line; Ctrl+H full keymap;");
         Console.WriteLine("      Ctrl+F find (Enter for the next match, Esc to finish),");
         Console.WriteLine("      F3 / Shift+F3 next / previous, Ctrl+R replace;");
@@ -275,6 +277,13 @@ internal sealed class Editor
     private readonly EditorCommands _commands;
     private readonly InputReader _reader;
     private readonly IHighlighter _highlighter;
+    private readonly MouseHandler _mouse;
+    // Whether Draw() scrolls the view to the caret. Normally yes, and every
+    // keystroke or click sets it back; only a wheel scroll clears it, because that
+    // is the one gesture that legitimately parts the view from the caret â€” the user
+    // is looking, not moving.
+    private bool _followCaret = true;
+
     private readonly List<InputEvent> _batch = new(256);
     // Modal prompts (Save-as, quit confirm) read input while the main loop is
     // still enumerating _batch. They must not touch it, or the outer foreach
@@ -289,7 +298,9 @@ internal sealed class Editor
         int startLine = 0,
         bool lineNumbers = false,
         int tabWidth = TabStops.DefaultTabWidth,
-        MessageKind openingKind = MessageKind.Info)
+        MessageKind openingKind = MessageKind.Info,
+        bool autoIndent = false,
+        bool tabsToSpaces = false)
     {
         _host = host;
         _buffer = buffer;
@@ -298,9 +309,15 @@ internal sealed class Editor
         _viewport = new Viewport(tabWidth);
         _cursor = new Cursor(buffer, _viewport.TabWidth);
         _view = new EditorView(_screen, _viewport, buffer, _cursor);
-        _commands = new EditorCommands(buffer, _cursor, new SystemClipboard());
+        _commands = new EditorCommands(buffer, _cursor, new SystemClipboard())
+        {
+            AutoIndent = autoIndent,
+            TabsToSpaces = tabsToSpaces,
+        };
         _view.Selection = _commands.Selection; // the view paints the live selection
         _reader = new InputReader(host);
+        _mouse = new MouseHandler(_view, _viewport, _commands);
+
 
         // Falls back to NullHighlighter for an unknown file type or a bad resource:
         // no colour, no error, no reason for the user to care.
@@ -328,20 +345,19 @@ internal sealed class Editor
             _batch.Clear();
             if (_reader.ReadBatch(_batch) == 0) continue;
 
-            // Stale feedback clears on the next keystroke — but only on a keystroke.
-            // With the mouse captured the console emits a record for every pointer
-            // *move*, so clearing on any non-empty batch meant dragging across the
-            // window wiped "Wrote 42 lines" (or an error) for a gesture that is not
-            // user intent and that the loop below discards anyway. Scanned up front
-            // rather than tracked inside the loop, because the clear has to land
-            // before the first command runs or it eats that command's own message.
-            if (HasKey(_batch)) _view.Message = "";
+            // Stale feedback clears on the next keystroke or click — not on any
+            // batch. With the mouse captured the console emits a record for every
+            // pointer *move*, so clearing on any non-empty batch meant dragging
+            // across the window wiped "Wrote 42 lines" (or an error) for a gesture
+            // that is not user intent. Scanned up front rather than tracked inside
+            // the loop, because the clear has to land before the first command runs
+            // or it eats that command's own message.
+            if (ClearsMessage(_batch)) _view.Message = "";
             int pageRows = Math.Max(1, _view.TextRows - 1);
 
             foreach (InputEvent ev in _batch)
             {
                 if (ev.Kind == InputEventKind.Resize) { _screen.Resize(ev.Width, ev.Height); continue; }
-                if (ev.Kind == InputEventKind.Mouse) continue; // phase 6
 
                 // A bug in a command must not cost the user their buffer. Before
                 // this, any exception escaping a keystroke unwound out of Main, and
@@ -352,9 +368,25 @@ internal sealed class Editor
                 // the user can still save it.
                 try
                 {
-                    switch (Keymap.Handle(ev, _commands, pageRows))
+                    if (ev.Kind == InputEventKind.Mouse)
                     {
+                        if (_mouse.Handle(ev, _buffer.LineCount)) _followCaret = true;
+                        else if (ev.MouseAction == MouseAction.Wheel) _followCaret = false;
+                        continue;
+                    }
+
+                    _followCaret = true;
+                    EditorAction action = Keymap.Handle(ev, _commands, pageRows);
+                    // Every modal (prompt, confirm, help, stats) is reached through
+                    // this switch and reads its own input, so a button-up released
+                    // inside one never reaches the handler. Forget the drag rather
+                    // than let the next hover select.
+                    if (action != EditorAction.None) _mouse.CancelDrag();
+                    switch (action)
+                    {
+
                         case EditorAction.Save: DoSave(); break;
+                        case EditorAction.SaveAs: DoSaveAs(); break;
                         case EditorAction.Quit: if (TryQuit()) return; break;
                         // A full screen rather than a one-line hint. The hint could
                         // not hold the keymap once search arrived, and the last time
@@ -380,14 +412,20 @@ internal sealed class Editor
         }
     }
 
-    private static bool HasKey(List<InputEvent> batch)
+    // A keystroke or a press is intent; a pointer move, a release or a wheel
+    // detent is not, and must leave the message alone.
+    private static bool ClearsMessage(List<InputEvent> batch)
     {
         foreach (InputEvent ev in batch)
         {
             if (ev.Kind == InputEventKind.Key) return true;
+            if (ev.Kind == InputEventKind.Mouse &&
+                ev.MouseAction is MouseAction.ButtonDown or MouseAction.DoubleClick)
+                return true;
         }
         return false;
     }
+
 
     // A command threw. Put the cursor somewhere legal — MoveTo clamps, and a cursor
     // left pointing outside the buffer would throw again on the very next frame and
@@ -429,7 +467,9 @@ internal sealed class Editor
         // TextColumns, not the screen width: the line-number gutter takes columns off
         // the left, and scrolling calibrated to the full width slides the caret under
         // it on a long line and strands the rightmost columns.
-        _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _view.TextColumns);
+        if (_followCaret)
+            _viewport.EnsureVisible(_cursor.Row, _cursor.DisplayColumn, _view.TextRows, _view.TextColumns);
+
         _highlighter.Pump();
         _highlighter.TokenizeWindow(_viewport.FirstLine, _view.TextRows);
         _view.Render();
@@ -438,8 +478,8 @@ internal sealed class Editor
         _host.Out.Flush();
     }
 
-    // Save to the buffer's path, prompting for one if it is new. Returns whether a
-    // write actually happened (the quit-then-save path needs to know).
+    // Ctrl+S. Save to the buffer's path, prompting for one if it is new. Returns
+    // whether a write actually happened (the quit-then-save path needs to know).
     private bool DoSave()
     {
         string? path = _buffer.Path;
@@ -448,7 +488,34 @@ internal sealed class Editor
             path = RunPrompt("Save as: ");
             if (string.IsNullOrEmpty(path)) { _view.Message = "Cancelled"; return false; }
         }
+        return WriteTo(path);
+    }
 
+    // Ctrl+O. Always asks, pre-filled with the current name so a rename is an edit
+    // rather than a retype. Writing over a *different* existing file gets a yes/no
+    // first, as nano does; saving back to the file's own path is what ^S already
+    // does silently and needs no ceremony here either.
+    private void DoSaveAs()
+    {
+        string? path = RunPrompt("Save as: ", _buffer.Path ?? "");
+        if (string.IsNullOrEmpty(path)) { _view.Message = "Cancelled"; return; }
+
+        bool samePath = _buffer.Path is not null
+            && string.Equals(Path.GetFullPath(path), Path.GetFullPath(_buffer.Path), StringComparison.OrdinalIgnoreCase);
+        if (!samePath && File.Exists(path)
+            && Confirm("File exists, overwrite?   Y: yes   N: no") != 'y')
+        {
+            _view.Message = "Cancelled";
+            return;
+        }
+
+        WriteTo(path);
+    }
+
+    // The write itself, shared by ^S and ^O. FileIo.Save rebinds the buffer to the
+    // path on success, so after a save-as the title row and the next ^S both follow.
+    private bool WriteTo(string path)
+    {
         try
         {
             FileIo.Save(_buffer, path);

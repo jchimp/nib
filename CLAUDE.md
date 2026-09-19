@@ -228,6 +228,22 @@ layout.
 when we write the bottom-right cell — which a full-screen renderer does on every
 frame.
 
+**`ReplaceFile` refuses a symlink.** Win32 error 1464, "This application does not
+support the current operation on symbolic links", is what `File.Replace` throws when the
+file being replaced is a reparse point. `~\.claude\CLAUDE.md` is a symlink into a
+dotfiles checkout, so it loaded and would not save. `FileIo.Save` resolves the link to
+its final target (`FileIo.ResolveLinkTarget`) and does the temp-and-replace *there*, so
+the link stands and the checkout sees a normal edit. Two things about it are
+load-bearing: the temp file goes in the **target's** directory, because link and target
+need not share a volume and a cross-volume replace is a copy; and `buffer.Path` stays
+the path the user typed, so the title row says what they opened. Do not "fix" this by
+deleting the link and writing a plain file in its place — that silently detaches the
+dotfiles setup, which is worse than the error was.
+
+The unit test for this soft-skips when it cannot create a link (Developer Mode or
+elevation is needed on Windows, and xunit 2 has no runtime skip), so a green run does
+not prove it. Verify against the real `~\.claude\CLAUDE.md`.
+
 **Clipboard ownership transfers on success.** After `SetClipboardData` returns
 non-zero, the system owns the `GlobalAlloc` block. Freeing it is a use-after-free
 for every other application on the machine.
@@ -394,14 +410,17 @@ that ever changes.
 
 ## Configuration (phase 6b)
 
-`%APPDATA%\nib\config.toml`, four keys, no schema:
+`%APPDATA%\nib\config.toml`, six keys, no schema:
 
 ```toml
 [editor]
 theme = "dark-plus"
 tab_width = 8
-mouse = false
+mouse = true
 line_numbers = false
+
+auto_indent = false
+tabs_to_spaces = false
 ```
 
 **Precedence is command line > config file > default**, and the thing that makes
@@ -423,6 +442,22 @@ divides by zero in `TabStops.NextTabStop`. An unknown theme resolves to null in
 "no match" with nobody left to report it.
 
 Nib never writes this file. There is no `--write-config` and no directory creation.
+
+`auto_indent` and `tabs_to_spaces` are config-only — no CLI flag, so no nullable on
+`ParsedArgs` for them. Both live on `EditorCommands` as plain settable bools so the
+tests set them after construction. Auto-indent copies only the whitespace left of
+the caret (nano's rule) and rides in the *same* `ApplyReplace` as the line break, so
+it is one undo step. Tabs-to-spaces measures from the selection start when there is
+one, because that is where the spaces land once the selection is typed over; it uses
+`Cursor.TabWidth` so the caret and the expansion can never disagree about the stop.
+
+**`^O` is Save As and must always prompt.** It shared `EditorAction.Save` with `^S`
+until 2026-09-12, and `DoSave` only prompts on a pathless buffer — so on any real
+file `^O` silently overwrote. `KeymapTests` pins the two actions apart. Save As
+pre-fills the current path, asks before writing over a *different* existing file,
+and relies on `FileIo.Save` rebinding `buffer.Path` so the title and the next `^S`
+follow the new name. The highlighter is not re-detected after a rename to another
+extension; reopening is 150 ms and that is the fix.
 
 ## Search and replace (phase 6c)
 
@@ -511,7 +546,51 @@ message. Two counts of the same buffer that differ by one make both untrustworth
 keymap once `^F` and `^R` existed — the rows were at 72 and 74 columns and the hint at
 77, against 80. `HelpScreenTests` pins every line against 80 columns *and* the whole
 page against a 24-row window, because `RenderOverlay` clips in both directions
-without complaint. The screen wants one more pass once mouse keys exist.
+without complaint. The page is at that 22-line limit: the mouse line cost the blank
+separator before "Display and counts", and the next line added has to pay the same way.
+
+## Mouse (phase 6d)
+
+`Ui/MouseHandler` is the `Keymap` of the mouse: it turns decoded events into caret,
+selection and viewport changes, and `Program.Run` only dispatches to it. It lives in
+`Ui/` because it needs `EditorView` for the geometry as well as `EditorCommands`, and
+`Commands/` does not reference `Ui/`.
+
+**Every click and drag goes through `EditorCommands.Move` with the same `extend` flag
+Shift+arrow uses.** That is what makes a mouse selection the keyboard selection —
+same anchor, same range, same clearing — rather than a second implementation that
+drifts. Do not have the handler touch `Selection` directly.
+
+**A drag is `MouseAction.Move` with `Buttons.Left` set, never a repeated press.** The
+old decode collapsed `dwButtonState` to ButtonDown/ButtonUp and threw the bit away on
+moves, so a drag was indistinguishable from a hover. `InputEvent.Buttons` now rides on
+every mouse event. The handler also keeps a `Dragging` flag, because a Move with Left
+held after a press that landed on the title row must not select; and every modal is
+reached through the `EditorAction` switch, so one `CancelDrag()` after any non-`None`
+action stops a button-up swallowed by a prompt from leaving that flag stuck on.
+
+**Wheel scrolls the viewport only; the caret stays put.** `Draw()` used to call
+`EnsureVisible` unconditionally, which would snap the view straight back. `Editor`
+now has `_followCaret`: a wheel clears it, any key or click sets it, and `Draw` skips
+`EnsureVisible` while it is off. `ClampVertical` still runs every frame. The nano
+alternative — drag the caret along with the scroll — grows a live selection while the
+user is only looking, which is why it lost.
+
+**Right-click pastes at the caret, not at the pointer.** Windows Terminal's convention.
+Moving the caret first would put the paste wherever the pointer happened to be resting
+rather than where the user was working.
+
+`EditorView.HitTest` is the inverse of `PlaceCursor` and has to agree with it about the
+title row, the gutter and the horizontal scroll, or a click lands one cell off from
+where the caret then paints. `HitTestClamped` pulls an off-area row into the text area
+for a drag that has left the window. Both resolve a click inside an expanded tab to the
+tab via `TabStops.DisplayToCharColumn`.
+
+The message row clears on a keystroke, a press or a double-click — not on a move, a
+release or a wheel detent (`ClearsMessage`). With the mouse captured the console emits
+a record per pointer move, and clearing on those wiped "Wrote 42 lines" for a gesture
+that is not intent.
+
 
 ## Coding conventions
 
@@ -533,11 +612,11 @@ without complaint. The screen wants one more pass once mouse keys exist.
   on a real console; the foundation is cleared for phase 2.
 - **Phases 2–5 implemented and unit-tested.** Phase 5 landed 2026-07-27; daily use
   since has discharged most of the interactive acceptance for phases 3–5.
-- **Phase 6 in progress (350 tests).** 6a (keymap/startup papercuts, TypeScript),
+- **Phase 6 in progress (409 tests).** 6a (keymap/startup papercuts, TypeScript),
   6b (config.toml) and 6c (search, replace, `^H` help screen, `^W` counts) all
-  landed 2026-08-23;
-  all three want a hardware pass. Next is mouse. See `ROADMAP.md` (note: at the repo
-  root, not `docs/`) and `docs/PROGRESS.md`.
+  landed 2026-08-23; 6d (mouse) landed 2026-09-19. All four want a hardware pass.
+  See `docs/ROADMAP.md` and `docs/PROGRESS.md`.
+
 
 ### Corrections carried forward
 

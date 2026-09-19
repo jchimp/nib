@@ -499,7 +499,13 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Key["^S / ^O"] --> DoSave["Editor.DoSave()"]
+    Key["^S"] --> DoSave["Editor.DoSave()"]
+    KeyO["^O"] --> DoSaveAs["Editor.DoSaveAs()"]
+    DoSaveAs --> PromptAs["RunPrompt('Save as: ', current path)"]
+    PromptAs --> Exists{"other file exists?"}
+    Exists -->|"yes"| Overwrite["Confirm('File exists, overwrite?')"]
+    Exists -->|"no"| Write
+    Overwrite -->|"y"| Write
     Quit["^X, no selection"] --> TryQuit["TryQuit()"]
     TryQuit --> Mod{"IsModified?"}
     Mod -->|"no"| Exit["return from Run()"]
@@ -510,7 +516,7 @@ flowchart LR
     DoSave --> HasPath{"buffer.Path?"}
     HasPath -->|"null"| Prompt["RunPrompt('Save as: ')<br/><i>modal, own event buffer</i>"]
     HasPath -->|"set"| Write
-    Prompt --> Write["FileIo.Save(buffer, path)"]
+    Prompt --> Write["WriteTo(path) → FileIo.Save(buffer, path)"]
     Write --> Atomic["write .name.nib-tmp in same dir<br/>→ File.Replace → MarkSaved()"]
 ```
 

@@ -16,10 +16,19 @@ theme = "dark-plus"
 # spaces or back, so this cannot change a byte of your file.
 tab_width = 8
 
-# false leaves the terminal its own drag-select-and-copy. true hands those
-# events to nib instead, which currently does nothing with them — so this
-# stays off until nib actually handles clicks.
-mouse = false
+# true: click places the caret, drag selects, wheel scrolls, right-click
+# pastes. false hands the mouse back to the terminal for its own
+# drag-select-and-copy.
+mouse = true
+
 
 # The line-number gutter. Alt+N toggles it for the session.
 line_numbers = false
+
+# Enter carries the current line's leading whitespace onto the new line,
+# like nano's `set autoindent`. Only the indent left of the caret is copied.
+auto_indent = false
+
+# The Tab key inserts spaces up to the next tab_width stop instead of a tab
+# character. Tabs already in the file are left alone either way.
+tabs_to_spaces = false

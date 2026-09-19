@@ -178,4 +178,28 @@ public class KeymapTests
         Send(Key(ConsoleKey.F3, KeyModifiers.Shift), cmd);
         Assert.Equal("hello world", buf.GetLine(0));
     }
+
+
+    // ^O shared Save's action, so on a file that already had a path it wrote over it
+    // with no prompt — the one thing a Save-as key must never do.
+    [Fact]
+    public void Ctrl_O_is_save_as_and_Ctrl_S_is_save()
+    {
+        (EditorCommands cmd, _, _, _) = Setup();
+        Assert.Equal(EditorAction.Save, Send(Ctrl(ConsoleKey.S), cmd));
+        Assert.Equal(EditorAction.SaveAs, Send(Ctrl(ConsoleKey.O), cmd));
+    }
+
+    [Fact]
+    public void Tab_key_inserts_a_tab_unless_tabs_to_spaces_is_on()
+    {
+        (EditorCommands cmd, TextBuffer buf, _, _) = Setup("");
+        Send(Key(ConsoleKey.Tab), cmd);
+        Assert.Equal("\t", buf.GetLine(0));
+
+        (cmd, buf, _, _) = Setup("");
+        cmd.TabsToSpaces = true;
+        Send(Key(ConsoleKey.Tab), cmd);
+        Assert.Equal(new string(' ', TabStops.DefaultTabWidth), buf.GetLine(0));
+    }
 }

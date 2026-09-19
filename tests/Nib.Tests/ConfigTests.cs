@@ -49,12 +49,15 @@ public class ConfigTests
     {
         Assert.Null(Config.Default.Theme);
         Assert.Equal(TabStops.DefaultTabWidth, Config.Default.TabWidth);
-        Assert.False(Config.Default.Mouse);
+        Assert.True(Config.Default.Mouse); // on since phase 6d: the loop consumes clicks now
+
         Assert.False(Config.Default.LineNumbers);
+        Assert.False(Config.Default.AutoIndent);   // nano's default too
+        Assert.False(Config.Default.TabsToSpaces); // a real tab is what Makefiles want
     }
 
     [Fact]
-    public void All_four_keys_load()
+    public void All_six_keys_load()
     {
         Config config = Parse("""
             [editor]
@@ -62,6 +65,8 @@ public class ConfigTests
             tab_width = 4
             mouse = true
             line_numbers = true
+            auto_indent = true
+            tabs_to_spaces = true
             """, out IReadOnlyList<string> problems);
 
         Assert.Empty(problems);
@@ -69,6 +74,24 @@ public class ConfigTests
         Assert.Equal(4, config.TabWidth);
         Assert.True(config.Mouse);
         Assert.True(config.LineNumbers);
+        Assert.True(config.AutoIndent);
+        Assert.True(config.TabsToSpaces);
+    }
+
+    [Fact]
+    public void A_bad_auto_indent_or_tabs_to_spaces_is_reported_and_keeps_the_default()
+    {
+        Config config = Parse("""
+            [editor]
+            auto_indent = yes
+            tabs_to_spaces = "true"
+            """, out IReadOnlyList<string> problems);
+
+        Assert.Equal(2, problems.Count);
+        Assert.Contains("line 2: auto_indent must be true or false", problems);
+        Assert.Contains("line 3: tabs_to_spaces must be true or false", problems);
+        Assert.False(config.AutoIndent);
+        Assert.False(config.TabsToSpaces);
     }
 
     [Fact]

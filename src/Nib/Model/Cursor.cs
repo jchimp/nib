@@ -21,6 +21,10 @@ public sealed class Cursor
     public int Col { get; private set; }
     public int DesiredColumn { get; private set; }
 
+    /// <summary>The tab width this cursor measures display columns with, so a
+    /// caller expanding a tab to spaces agrees with the caret about where the stop is.</summary>
+    public int TabWidth => _tabWidth;
+
     public Cursor(TextBuffer buffer, int tabWidth = TabStops.DefaultTabWidth)
     {
         _buffer = buffer;

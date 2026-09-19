@@ -61,17 +61,28 @@ if it isn't there you get the defaults shown.
 [editor]
 theme = "dark-plus"
 tab_width = 8
-mouse = false
+mouse = true
 line_numbers = false
+
+auto_indent = false
+tabs_to_spaces = false
 ```
 
 A command-line flag beats the file. A line nib can't read is reported on the
 message row and skipped — the rest of the file still applies, and a bad setting
 can never stop the editor opening.
 
-`mouse` is off by default, which leaves the terminal its own drag-select-and-copy.
-Turning it on hands those events to nib instead, and nib does not yet do anything
-with them — so it is off until clicks position the caret.
+`auto_indent` makes Enter carry the current line's leading whitespace onto the new
+line, as nano's `set autoindent` does. `tabs_to_spaces` makes the Tab key insert
+spaces up to the next `tab_width` stop instead of a tab character. Both are off by
+default: a Makefile or `.gitconfig` wants a real tab, and nib never rewrites the
+tabs a file already has either way.
+
+`mouse` is on by default: click places the caret, drag selects, Shift+click extends,
+double-click selects a word, the wheel scrolls without moving the caret, and
+right-click pastes. `mouse = false` (or `--no-mouse`) hands the terminal back its own
+drag-select-and-copy instead.
+
 
 | Keys | |
 |---|---|
@@ -83,13 +94,18 @@ with them — so it is off until clicks position the caret.
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+K / Ctrl+U | Cut line / paste line |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
-| Ctrl+S or Ctrl+O | Save |
+| Ctrl+S | Save |
+| Ctrl+O | Save as (prompts for the name, pre-filled with the current one) |
 | Ctrl+Q | Quit |
 | Ctrl+X | Cut, or quit with no selection |
 | Ctrl+G | Go to line |
 | Ctrl+H | Help |
 | Alt+T | Cycle theme |
 | Alt+N | Toggle line numbers |
+| Click / drag / double-click | Place the caret / select / select a word |
+| Wheel | Scroll (the caret stays put; the next key brings the view back) |
+| Right-click | Paste |
+
 
 Ctrl+Q is the exit key; Ctrl+X keeps nano's context-dependent meaning so both
 habits work. Copying collapses the selection rather than leaving it painted.

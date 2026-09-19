@@ -2,8 +2,8 @@ namespace Nib.Model;
 
 /// <summary>
 /// The settings read from <c>%APPDATA%\nib\config.toml</c>: theme, tab width,
-/// mouse, and the line-number gutter. Four keys, no schema, no writer — nib reads
-/// this file and never creates it.
+/// mouse, the line-number gutter, auto-indent and tabs-to-spaces. Six keys, no
+/// schema, no writer — nib reads this file and never creates it.
 ///
 /// Lives in <c>Model/</c> because it is console-free by construction, which is what
 /// lets the parser and its error cases be tested without a terminal. It is also why
@@ -30,15 +30,23 @@ public sealed record Config
     public int TabWidth { get; init; } = TabStops.DefaultTabWidth;
 
     /// <summary>
-    /// Off by default, and deliberately so until the mouse handler lands: capturing
-    /// the mouse costs the terminal its own ENABLE_QUICK_EDIT_MODE drag-select-and-copy,
-    /// and the editor loop discards every mouse event it receives. That trade is worth
-    /// making once clicks position the caret; it is a pure loss before then. Flip this
-    /// back with phase 6's mouse work.
+    /// On by default since the mouse handler landed (phase 6d). Capturing the mouse
+    /// costs the terminal its own ENABLE_QUICK_EDIT_MODE drag-select-and-copy, and
+    /// while the loop discarded every mouse event that was a pure loss; now a drag
+    /// selects in the editor and ^C puts it on the same system clipboard. Setting
+    /// this false (or <c>--no-mouse</c>) hands quick-edit back untouched.
     /// </summary>
-    public bool Mouse { get; init; }
+    public bool Mouse { get; init; } = true;
+
 
     public bool LineNumbers { get; init; }
+
+    /// <summary>Enter carries the current line's indent. Off, as in nano.</summary>
+    public bool AutoIndent { get; init; }
+
+    /// <summary>Tab inserts spaces to the next stop. Off: a real tab is what
+    /// Makefiles and .gitconfig want, and that is the kind of file this edits.</summary>
+    public bool TabsToSpaces { get; init; }
 
     public static Config Default { get; } = new();
 
@@ -154,6 +162,20 @@ public sealed record Config
                         found.Add($"line {lineNo}: line_numbers must be true or false");
                     else
                         config = config with { LineNumbers = gutter };
+                    break;
+
+                case "auto_indent":
+                    if (!TryBool(value, out bool indent))
+                        found.Add($"line {lineNo}: auto_indent must be true or false");
+                    else
+                        config = config with { AutoIndent = indent };
+                    break;
+
+                case "tabs_to_spaces":
+                    if (!TryBool(value, out bool spaces))
+                        found.Add($"line {lineNo}: tabs_to_spaces must be true or false");
+                    else
+                        config = config with { TabsToSpaces = spaces };
                     break;
 
                 default:
