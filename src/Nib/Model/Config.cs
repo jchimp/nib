@@ -30,13 +30,14 @@ public sealed record Config
     public int TabWidth { get; init; } = TabStops.DefaultTabWidth;
 
     /// <summary>
-    /// Off by default, and deliberately so until the mouse handler lands: capturing
-    /// the mouse costs the terminal its own ENABLE_QUICK_EDIT_MODE drag-select-and-copy,
-    /// and the editor loop discards every mouse event it receives. That trade is worth
-    /// making once clicks position the caret; it is a pure loss before then. Flip this
-    /// back with phase 6's mouse work.
+    /// On by default since the mouse handler landed (phase 6d). Capturing the mouse
+    /// costs the terminal its own ENABLE_QUICK_EDIT_MODE drag-select-and-copy, and
+    /// while the loop discarded every mouse event that was a pure loss; now a drag
+    /// selects in the editor and ^C puts it on the same system clipboard. Setting
+    /// this false (or <c>--no-mouse</c>) hands quick-edit back untouched.
     /// </summary>
-    public bool Mouse { get; init; }
+    public bool Mouse { get; init; } = true;
+
 
     public bool LineNumbers { get; init; }
 
