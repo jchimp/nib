@@ -2,10 +2,10 @@
 
 ## Current Focus
 Phase 6 (polish). 6a/6b/6c all landed 2026-08-23; a senior review pass over 0.6.2 the same day found and
-fixed a real rendering bug (tabs painted over the line-number gutter) and turned the mouse capture off by
-default, since the loop discards every mouse event until phase 6's mouse work. 373 tests green. Next is
-still mouse, then the help-screen pass once the mouse keys exist; the rest of the review's findings are
-queued below in rough impact/effort order.
+fixed a real rendering bug (tabs painted over the line-number gutter). 6d (mouse) landed 2026-09-19, verified on hardware,
+and flipped `mouse` back on by default. 409 tests green. Next is the frame-flicker fix (cursor hide +
+synchronized output), then the 6b/6c hardware passes; the review's findings are queued below.
+
 
 ## Open Todos
 - [x] Phase 1 — terminal foundation (verified 2026-07-26)
@@ -21,7 +21,12 @@ queued below in rough impact/effort order.
       inside the prompt (the label badges change and so do the hits); a term that is not there reports in
       red with the caret unmoved; `^R` answering Y, N and then A, with one `^Z` undoing the whole A run;
       `^H` at 80 columns and on a 24-row window; `^W` with and without a selection
-- [ ] Phase 6b hardware pass, on the back of 6a: a config with all four keys non-default takes effect; `--theme` overrides it and `--no-config` ignores it; `mouse = false` gives the terminal its drag-select back and `mouse = true` takes it away; a corrupt line reports in red on the message row and the editor still opens
+- [x] Phase 6d hardware pass: click, drag, Shift+click, double-click, right-click paste, wheel all work
+      in Windows Terminal (2026-09-19)
+- [ ] Selection flickers on double-click and at the end of a drag: hide the cursor during the frame and
+      bracket it in DECSET 2026 synchronized output; fall back to `--probe` event logging if it persists
+- [ ] Phase 6b hardware pass, on the back of 6a:
+ a config with all four keys non-default takes effect; `--theme` overrides it and `--no-config` ignores it; `mouse = false` gives the terminal its drag-select back and `mouse = true` takes it away; a corrupt line reports in red on the message row and the editor still opens
 - [ ] Decide whether to keep the committed 660 KB `tests/fixtures/sample-10k.txt` or gitignore + generate
 - [ ] Consider re-running `nib --soak` on any TextMateSharp or .NET upgrade — it is the only thing standing between us and the Onigwrap heap report
 
@@ -41,6 +46,23 @@ are checked so the list stays a record of the whole pass rather than only what i
 - [ ] **L-3** A line clipped at the right edge loses its trailing selection cell
 
 ## Progress Log
+
+### 2026-09-19 (phase 6d: mouse)
+
+- Click places the caret, drag selects, Shift+click extends, double-click selects a whitespace-delimited
+  word, wheel scrolls the view only (caret stays; next key snaps back), right-click pastes at the caret.
+  `mouse` defaults to true again; `--no-mouse` / `mouse = false` hands quick-edit back.
+- `InputEvent.Buttons` rides on every mouse event — Windows reports a drag as `MOUSE_MOVED` with the
+  button bit set, and the old decode threw it away. `DecodeMouse` is `internal` and tested.
+- `Ui/MouseHandler` is the `Keymap` of the mouse; every caret move goes through `EditorCommands.Move`
+  with the Shift+arrow `extend` flag, so mouse selection matches keyboard selection by construction.
+- `Editor._followCaret` lets a wheel part the view from the caret; one `CancelDrag()` after any
+  `EditorAction` covers all modals. Help screen has its mouse line. 409 tests.
+- Hardware pass (Windows Terminal): all gestures work. One defect: the selection flickers briefly on
+  double-click and at the end of a drag. Not a model bug — the diff emits nothing for an unchanged
+  selection — the frame is painted with the cursor visible and without DECSET 2026 bracketing.
+- Next: hide the cursor per frame and wrap frames in synchronized output; if the flicker survives that,
+  teach `--probe` to log button-carrying moves and capture the real event sequence.
 
 ### 2026-09-13 (save through a symlink)
 
