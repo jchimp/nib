@@ -19,7 +19,7 @@
     # The NAS share -Ship copies releases to. Each version lands in its own
     # folder, <NasRoot>\<ProjectName>\<version>\. Use a UNC path: a mapped
     # drive letter is not visible from an elevated shell. '' turns -Ship off.
-    NasRoot = ''
+    NasRoot = '\\CONAS01\NetShare\Apps\'
 
     # Test project. Set to '' to skip the test step entirely.
     TestProject = 'tests\Nib.Tests\Nib.Tests.csproj'
