@@ -6,6 +6,8 @@ release, and its text becomes the GitHub release notes.
 
 ## Unreleased
 
+## 0.8.0 (2026-11-22)
+
 ### Added
 
 - `uninstall.ps1` ships in the release zip and is copied into the install
