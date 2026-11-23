@@ -13,22 +13,23 @@ no multiple buffers.
 
 ## Install
 
-Download `nib-<version>-win-x64.zip` from the release, extract it, and run:
+Download `nib-<version>.zip` from the release, extract it, and run:
 
 ```powershell
-.\install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-That copies `nib.exe` to `%LOCALAPPDATA%\Programs\nib` and adds it to your user
-PATH. No admin rights. Open a new terminal, then:
+That copies nib to `%LOCALAPPDATA%\Programs\nib`, adds it to your user PATH, and
+lists it in Settings > Apps. No admin rights. Open a new terminal, then:
 
 ```powershell
 nib --version
 nib config.toml
 ```
 
-To see what it will do first, `.\install.ps1 -WhatIf`. To remove it,
-`.\install.ps1 -Uninstall`.
+To see what it will do first, add `-DryRun`. To remove it, use Settings > Apps >
+nib, or run `uninstall.ps1` in the install folder. Your
+`%APPDATA%\nib\config.toml` is kept.
 
 If you'd rather skip the script, `nib.exe` is self-contained — drop it anywhere on
 your PATH and it works. There are no prerequisites; the .NET runtime is inside the

@@ -52,8 +52,10 @@ src/Nib/
   Commands/      Keymap, Commands                                     (phase 3+)
   Resources/     Grammars/*.json.gz, Themes/*.json.gz  (generated, committed)
 grammars/manifest.json
-scripts/fetch-grammars.ps1
+scripts/        fetch-grammars.ps1, release.ps1 + release.settings.psd1,
+                install.ps1, uninstall.ps1; old/ holds the pre-0.8 scripts
 tests/Nib.Tests/
+CHANGELOG.md
 ```
 
 ### The one architectural rule
@@ -101,9 +103,19 @@ Refresh vendored grammars (not part of the build; the `.gz` files are committed)
 ./scripts/fetch-grammars.ps1 -Force
 ```
 
-**Releasing.** `./scripts/release.ps1` → `dist/nib-x.y.z-win-x64.zip`
-(exe + `install.ps1` + docs + SHA256). Details in BUILD.md. Two things about it are
-load-bearing:
+**Releasing.** `./scripts/release.ps1 -Version x.y.z -Apply`, commit, push, then
+`./scripts/release.ps1 -Publish -Apply` → `release/nib-x.y.z.zip` (exe +
+`install.ps1` + `uninstall.ps1` + README, LICENSE, CHANGELOG + SHA256), tagged and on
+GitHub with the CHANGELOG section as notes. Flow and refusals in `docs/RELEASE.md`,
+build details in `docs/BUILD.md`.
+
+`release.ps1` is a shared template and must stay **byte-identical** to it; nib's
+values live in `scripts/release.settings.psd1`. A fix to the script belongs in the
+template, then gets copied here. Run it from `pwsh`: Windows PowerShell 5.1 launched
+from a PowerShell 7 window inherits 7's module path and dies on
+`Import-PowerShellDataFile` (a template bug, not yet fixed there).
+
+Two things about it are load-bearing:
 
 - The release publish is **self-contained**; the csproj is not. `SelfContained=true`
   in the csproj would make every `dotnet build` copy the runtime into `bin/`, so
@@ -122,8 +134,10 @@ Both of these were found by running the thing, not by reading it. Same rule as
 `Terminal/`: written down so they cost that time once.
 
 **Editing user PATH corrupts it from both sides if you use the convenient API.**
-`install.ps1` reads from `HKCU:\Environment` with `DoNotExpandEnvironmentNames` and
-writes back through `RegistryKey.SetValue` with the value kind preserved.
+`install.ps1` and `uninstall.ps1` read from `HKCU:\Environment` with
+`DoNotExpandEnvironmentNames` and write back through `RegistryKey.SetValue` with the
+value kind preserved. The code is duplicated on purpose (each script runs alone from
+the install folder), so a fix goes into both.
 
 - Read side: `[Environment]::GetEnvironmentVariable('Path','User')` *expands*
   `%USERPROFILE%`-style entries. Write that string back and you have silently
@@ -138,10 +152,16 @@ Avoiding `SetEnvironmentVariable` means no `WM_SETTINGCHANGE` broadcast, so the
 script sends one itself via `SendMessageTimeout` (not `SendMessage` — a hung
 top-level window would block the installer indefinitely).
 
-Jeremy's PATH really does end in `%USERPROFILE%\.dotnet\tools`, so this is not
-hypothetical. Verify a change to that code by checking `GetValueKind('Path')` is
-still `ExpandString` and the raw value is byte-identical after install-then-
-uninstall.
+Jeremy's PATH used to end in `%USERPROFILE%\.dotnet\tools`; as of 2026-11-22 it
+holds no `%VAR%` entries, so a round trip on it no longer exercises that case. It
+does end in a trailing `;`, which is the third trap: filtering out empty entries
+drops it, and the round trip comes back one byte short. `Split-PathList` keeps
+empties and `Add-ToUserPath` appends *before* a trailing `;` for that reason.
+
+Verify a change to that code by checking `GetValueKind('Path')` is still
+`ExpandString` and the raw value is byte-identical after install-then-uninstall.
+Install to a scratch folder with `-InstallDir` so the real install is not touched,
+and save the raw value first.
 
 **Keep `scripts/*.ps1` pure ASCII.** None of them carry a BOM, so Windows PowerShell
 5.1 decodes them as CP-1252, not UTF-8. A UTF-8 em dash is three bytes and the last
@@ -591,6 +611,23 @@ release or a wheel detent (`ClearsMessage`). With the mouse captured the console
 a record per pointer move, and clearing on those wiped "Wrote 42 lines" for a gesture
 that is not intent.
 
+
+## Changelog
+
+`CHANGELOG.md` at the repo root is the release notes. `release.ps1 -Version` rolls
+`## Unreleased` into the version section, and `-Tag`/`-Publish` refuse unless the
+newest section matches the csproj `<Version>`.
+
+- **Every user-visible change adds a line under `## Unreleased`, in the same commit
+  as the change** (or the same PR, if the PR is the unit). A PR that changes
+  behaviour without touching the CHANGELOG is not done.
+- User-visible means what someone who runs or installs nib would notice: keys,
+  config keys, CLI flags, file handling, install/uninstall behaviour, fixed bugs.
+  Refactors, tests and internal docs do not get entries.
+- Group under `### Added`, `### Changed`, `### Fixed`, `### Removed`. Write for the
+  user, not the code: "`^O` now always prompts", not "split `EditorAction.SaveAs`".
+- Never edit a released version section, and never write the version heading by
+  hand; `-Version` writes it with the date.
 
 ## Coding conventions
 

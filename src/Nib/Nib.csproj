@@ -9,9 +9,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
 
-    <!-- One source of truth for the version flag, the release zip name and the
-         VERSION.txt inside it. scripts/release.ps1 reads this value when no -Version
-         is passed, so a release is whatever is committed here. -->
+    <!-- One source of truth for the version flag and the release zip name.
+         scripts/release.ps1 -Version is what writes it (and rolls CHANGELOG.md);
+         -Publish reads it, so a release is whatever is committed here. -->
     <Version>0.7.1</Version>
     <Product>Nib</Product>
     <Company>Jeremy Champion</Company>
