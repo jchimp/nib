@@ -1,49 +1,54 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installs nib.exe to a per-user location and puts it on PATH.
+    Installs nib for the current user and puts it on PATH. No admin rights needed.
 
 .DESCRIPTION
-    Copies nib.exe from beside this script into %LOCALAPPDATA%\Programs\nib and
-    appends that directory to the *user* PATH. No admin rights, no HKLM, nothing
-    under Program Files - an editor this small does not deserve an elevation
-    prompt.
+    Run from the unzipped release folder:
 
-    Safe to re-run: an existing PATH entry is left alone rather than duplicated,
-    and the exe is simply overwritten.
+        powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
-    This script ships inside the release zip and is also usable straight from the
-    repo after a publish, if you point -Source at the publish directory.
+    Copies the release to %LOCALAPPDATA%\Programs\nib, appends that folder to
+    the *user* PATH, and registers an uninstall entry in Settings > Apps for the
+    current user only (HKCU). No HKLM, nothing under Program Files - an editor
+    this small does not deserve an elevation prompt.
 
-.PARAMETER Source
-    Directory containing nib.exe. Defaults to this script's own directory, which
-    is how it is laid out in the release zip.
+    Running it again upgrades in place. An existing PATH entry is left alone
+    rather than duplicated.
+
+    It never touches %APPDATA%\nib\config.toml.
 
 .PARAMETER InstallDir
-    Where to put nib.exe. Defaults to %LOCALAPPDATA%\Programs\nib.
-
-.PARAMETER Uninstall
-    Remove the install directory and strip its PATH entry.
+    Where nib is installed. The folder must be empty, missing, or an earlier
+    nib install: everything in it is replaced.
 
 .PARAMETER NoPath
-    Copy the exe but leave PATH untouched.
+    Install, but leave PATH untouched.
+
+.PARAMETER DryRun
+    Print what would happen and change nothing.
 
 .EXAMPLE
-    ./install.ps1 -WhatIf
+    .\install.ps1 -DryRun
 
 .EXAMPLE
-    ./install.ps1
-
-.EXAMPLE
-    ./install.ps1 -Uninstall
+    .\install.ps1
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding()]
 param(
-    [string] $Source,
-    [string] $InstallDir,
-    [switch] $Uninstall,
-    [switch] $NoPath
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\nib'),
+    [switch]$NoPath,
+    [switch]$DryRun
 )
+
+# Started from a PowerShell 7 window, Windows PowerShell inherits 7's module
+# paths and loads 7's Utility module, which is missing cmdlets 5.1 has. Drop
+# those paths for this process before anything loads a module.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = (($env:PSModulePath -split ';') | Where-Object {
+            $_ -and $_ -notmatch '\\PowerShell\\|\\Microsoft\.PowerShell_'
+        }) -join ';'
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -53,24 +58,44 @@ $ErrorActionPreference = 'Stop'
 # string mid-line and makes one function swallow the next. No parse error, wrong
 # code runs. ScriptEncodingTests enforces it.
 
-# Resolved here rather than as param defaults: $PSScriptRoot is not reliably
-# populated while param defaults are being evaluated under `powershell -File`,
-# which is exactly how someone who double-clicks or right-click-runs this will
-# invoke it.
-if (-not $Source)     { $Source     = Split-Path -Parent $MyInvocation.MyCommand.Path }
-if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\nib' }
+$AppName      = 'nib'
+$ExeName      = 'nib.exe'
+$UninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\nib'
+
+function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
+function Write-Note { param([string]$Message) Write-Host "    $Message" -ForegroundColor DarkGray }
+function Write-Warn { param([string]$Message) Write-Host "  ! $Message" -ForegroundColor Yellow }
+
+function Invoke-Change {
+    # Every write goes through here, so -DryRun cannot miss one.
+    param([string]$Description, [scriptblock]$Action)
+    if ($DryRun) {
+        Write-Note "would $Description"
+    }
+    else {
+        Write-Note $Description
+        & $Action
+    }
+}
+
+function Get-FullPath {
+    param([string]$Path)
+    return [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+}
 
 # --- user PATH -------------------------------------------------------------
+#
+# The same code lives in uninstall.ps1. Each script has to run on its own from
+# wherever it sits, so there is no shared module to put it in. Fix both.
 #
 # Read PATH from the registry with DoNotExpandEnvironmentNames, NOT with
 # [Environment]::GetEnvironmentVariable('Path','User').
 #
 # The convenience API expands entries like %USERPROFILE%\bin before handing the
 # string back. Writing that expanded string back would bake in literal paths that
-# were deliberately written as variables, and would rewrite the value as REG_SZ
-# instead of REG_EXPAND_SZ so the surviving %VARS% stop expanding at all. Either
-# way we would corrupt PATH entries belonging to other tools, which is a far worse
-# outcome than failing to install an editor.
+# were deliberately written as variables. Either way we would corrupt PATH entries
+# belonging to other tools, which is a far worse outcome than failing to install
+# an editor.
 #
 # Writing has the mirror-image trap. [Environment]::SetEnvironmentVariable stores a
 # plain REG_SZ, so a PATH that was REG_EXPAND_SZ comes back downgraded and every
@@ -128,10 +153,13 @@ function Set-UserPathRaw {
     Send-SettingChange
 }
 
+# Empty entries are kept, not filtered out. A PATH ending in ';' (common: many
+# installers leave one) would otherwise lose it on install, and the
+# install-then-uninstall round trip would not give back the bytes it started from.
 function Split-PathList {
     param([string] $Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
-    return @($Value -split ';' | Where-Object { $_ -ne '' })
+    if ([string]::IsNullOrEmpty($Value)) { return @() }
+    return @($Value -split ';')
 }
 
 # Compares PATH entries the way Windows resolves them: case-insensitively, and
@@ -146,87 +174,140 @@ function Test-SamePathEntry {
 }
 
 function Add-ToUserPath {
-    [CmdletBinding(SupportsShouldProcess)]
-    param([Parameter(Mandatory)][string] $Directory)
-
-    $raw     = Get-UserPathRaw
-    $entries = Split-PathList $raw
-
-    if ($entries | Where-Object { Test-SamePathEntry $_ $Directory }) {
-        Write-Host "PATH already contains $Directory - leaving it alone."
-        return
-    }
-
-    $updated = (@($entries) + $Directory) -join ';'
-    if ($PSCmdlet.ShouldProcess('user PATH', "append $Directory")) {
-        Set-UserPathRaw -Value $updated
-        Write-Host "Added $Directory to your user PATH."
-    }
-}
-
-function Remove-FromUserPath {
-    [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string] $Directory)
 
     $entries = Split-PathList (Get-UserPathRaw)
-    $kept    = @($entries | Where-Object { -not (Test-SamePathEntry $_ $Directory) })
 
-    if ($kept.Count -eq $entries.Count) {
-        Write-Host "PATH does not contain $Directory - nothing to remove."
+    if ($entries | Where-Object { Test-SamePathEntry $_ $Directory }) {
+        Write-Note "PATH already contains $Directory, so it is left alone."
         return
     }
 
-    if ($PSCmdlet.ShouldProcess('user PATH', "remove $Directory")) {
-        Set-UserPathRaw -Value ($kept -join ';')
-        Write-Host "Removed $Directory from your user PATH."
+    # Before a trailing ';', not after it: 'a;b;' becomes 'a;b;dir;', so
+    # uninstall.ps1 removing the entry gives back 'a;b;' exactly.
+    if ($entries.Count -gt 0 -and $entries[-1] -eq '') {
+        $entries = @($entries[0..($entries.Count - 2)]) + $Directory + ''
+    }
+    else {
+        $entries = @($entries) + $Directory
+    }
+    $updated = $entries -join ';'
+    Invoke-Change "append $Directory to your user PATH" {
+        Set-UserPathRaw -Value $updated
     }
 }
 
-# --- install / uninstall ---------------------------------------------------
+# --- checks ----------------------------------------------------------------
 
-if ($Uninstall) {
-    if (Test-Path -LiteralPath $InstallDir) {
-        if ($PSCmdlet.ShouldProcess($InstallDir, 'remove directory')) {
-            Remove-Item -LiteralPath $InstallDir -Recurse -Force
-            Write-Host "Removed $InstallDir."
-        }
-    } else {
-        Write-Host "$InstallDir does not exist - nothing to remove."
+# $PSScriptRoot in the body, not in a param default: it is not reliably set
+# while param defaults are evaluated under `powershell -File`, which is how
+# someone who right-click-runs this will invoke it.
+$sourceDir  = Get-FullPath $PSScriptRoot
+$InstallDir = Get-FullPath $InstallDir
+$sourceExe  = Join-Path $sourceDir $ExeName
+$targetExe  = Join-Path $InstallDir $ExeName
+
+if (-not (Test-Path -LiteralPath $sourceExe)) {
+    throw "$ExeName is not next to install.ps1. Run install.ps1 from the unzipped release folder."
+}
+if ($sourceDir -ieq $InstallDir) {
+    throw "install.ps1 is running from the install folder itself ($InstallDir). Run it from the unzipped release folder."
+}
+# The install folder is wiped before the copy, so refuse anything that is not
+# clearly ours. An empty or missing folder is fine. A 0.7.x install held only
+# nib.exe, so it passes and is upgraded.
+if ((Test-Path -LiteralPath $InstallDir) -and
+    (@(Get-ChildItem -LiteralPath $InstallDir -Force).Count -gt 0) -and
+    -not (Test-Path -LiteralPath $targetExe)) {
+    throw "$InstallDir has files but no $ExeName, so it is not a nib install. Pick an empty folder with -InstallDir."
+}
+
+$version  = ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($sourceExe).ProductVersion -split '\+')[0]
+$modeText = ''
+if ($DryRun) { $modeText = ' (dry run, nothing will change)' }
+Write-Step "Installing $AppName $version to $InstallDir$modeText"
+
+# --- running copies --------------------------------------------------------
+
+# A running nib.exe is locked, and the folder is wiped before the copy, so an
+# install over a running copy would stop halfway with the old files gone.
+# Refused rather than stopped: unlike a tray app, a running editor may hold
+# unsaved text, and killing it would throw that away.
+# @() because a pipeline that matches nothing is $null on 5.1.
+$running = @(Get-Process -Name $AppName -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and ((Get-FullPath $_.Path) -ieq $targetExe)
+    })
+if ($running.Count -gt 0) {
+    $msg = "nib is running from $InstallDir ($($running.Count) cop$(if ($running.Count -eq 1) { 'y' } else { 'ies' })). Save your work, close it, and run install.ps1 again."
+    if ($DryRun) { Write-Warn "would fail: $msg" } else { throw $msg }
+}
+
+# --- copy ------------------------------------------------------------------
+
+Write-Step 'Copying files'
+$payload = @(Get-ChildItem -LiteralPath $sourceDir -Force | Where-Object { $_.Name -ne 'install.ps1' })
+if (Test-Path -LiteralPath $InstallDir) {
+    # Clear first so files dropped from a newer release do not linger.
+    Invoke-Change "remove the previous files in $InstallDir" {
+        Get-ChildItem -LiteralPath $InstallDir -Force | Remove-Item -Recurse -Force
     }
-
-    Remove-FromUserPath -Directory $InstallDir
-    Write-Host ''
-    Write-Host 'Uninstalled. Shells already open still have the old PATH; open a new one.'
-    return
+}
+Invoke-Change "copy $($payload.Count) item(s) to $InstallDir" {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    $payload | Copy-Item -Destination $InstallDir -Recurse -Force
+    # A zip downloaded from the internet marks its files as such, and SmartScreen
+    # then blocks the unsigned exe on every launch. The user has chosen to
+    # install it, so drop the mark on the installed copy only.
+    Get-ChildItem -LiteralPath $InstallDir -Recurse -File | Unblock-File
 }
 
-$exe = Join-Path $Source 'nib.exe'
-if (-not (Test-Path -LiteralPath $exe)) {
-    throw "nib.exe not found at $exe. Run this from the extracted release folder, or pass -Source with the directory containing nib.exe."
+# --- PATH ------------------------------------------------------------------
+
+Write-Step 'User PATH'
+if ($NoPath) {
+    Write-Note 'skipped (-NoPath)'
+}
+else {
+    Add-ToUserPath -Directory $InstallDir
 }
 
-if (-not (Test-Path -LiteralPath $InstallDir)) {
-    if ($PSCmdlet.ShouldProcess($InstallDir, 'create directory')) {
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+# --- uninstall entry -------------------------------------------------------
+
+Write-Step 'Uninstall entry (Settings > Apps)'
+$uninstallScript = Join-Path $InstallDir 'uninstall.ps1'
+$powershellExe   = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+Invoke-Change "write $UninstallKey" {
+    $sizeKb = [int]((Get-ChildItem -LiteralPath $InstallDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1KB)
+    New-Item -Path $UninstallKey -Force | Out-Null
+    $values = @{
+        DisplayName     = $AppName
+        DisplayVersion  = $version
+        Publisher       = 'Jeremy Champion'
+        InstallLocation = $InstallDir
+        DisplayIcon     = "$targetExe,0"
+        UninstallString = "`"$powershellExe`" -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
     }
-}
-
-$target = Join-Path $InstallDir 'nib.exe'
-if ($PSCmdlet.ShouldProcess($target, 'copy nib.exe')) {
-    # A running nib.exe holds a lock on its own image; say so plainly rather than
-    # letting the raw "being used by another process" surface.
-    try {
-        Copy-Item -LiteralPath $exe -Destination $target -Force
-    } catch [System.IO.IOException] {
-        throw "Could not write $target - close any running nib and try again. ($($_.Exception.Message))"
+    foreach ($name in $values.Keys) {
+        New-ItemProperty -Path $UninstallKey -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null
     }
-    Write-Host "Installed nib.exe to $InstallDir."
+    foreach ($name in 'NoModify', 'NoRepair') {
+        New-ItemProperty -Path $UninstallKey -Name $name -Value 1 -PropertyType DWord -Force | Out-Null
+    }
+    New-ItemProperty -Path $UninstallKey -Name 'EstimatedSize' -Value $sizeKb -PropertyType DWord -Force | Out-Null
 }
 
-if (-not $NoPath) { Add-ToUserPath -Directory $InstallDir }
+# --- done ------------------------------------------------------------------
 
-Write-Host ''
-Write-Host 'Done. This shell still has the old PATH - open a new terminal, or run:'
-Write-Host "    `$env:Path += ';$InstallDir'"
-Write-Host ''
-Write-Host 'Then: nib --version'
+Write-Step 'Done'
+if ($DryRun) {
+    Write-Note 'Dry run: nothing was changed. Run again without -DryRun to install.'
+}
+else {
+    Write-Note "$AppName $version is installed."
+    if (-not $NoPath) {
+        Write-Note 'This shell still has the old PATH - open a new terminal, or run:'
+        Write-Note "    `$env:Path += ';$InstallDir'"
+    }
+    Write-Note 'Then: nib --version'
+}
+Write-Note 'To uninstall: Settings > Apps > nib, or run uninstall.ps1 in the install folder.'

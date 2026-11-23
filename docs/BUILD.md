@@ -66,45 +66,82 @@ the .NET runtime, with an error that explains nothing.
 
 ## Releasing
 
+Full flow, refusal messages and recovery: [RELEASE.md](RELEASE.md). Short version:
+
 ```powershell
-./scripts/release.ps1 -WhatIf   # see what it will do
-./scripts/release.ps1
+# As you work: add notes under "## Unreleased" in CHANGELOG.md.
+./scripts/release.ps1 -Version 0.9.0 -Apply   # bump the csproj, roll the CHANGELOG
+git commit -am "Release 0.9.0."
+git push origin HEAD
+./scripts/release.ps1 -Publish                # rehearse
+./scripts/release.ps1 -Publish -Apply         # do it
 ```
 
-**The version comes from `<Version>` in [src/Nib/Nib.csproj](src/Nib/Nib.csproj).**
-Bump it there and commit before releasing; `-Version x.y.z` overrides it for a
-one-off build under a number you do not want committed. Reading it from the project
-rather than the command line is what makes the version that ships the version in the
-commit — and it is why the dirty-tree check earns its keep, since a bump has to be
-committed before it can be released.
+Nothing is written, tagged or pushed without `-Apply`.
 
-Producing `dist/nib-<version>-win-x64.zip` plus a `.sha256` sidecar. The zip
-contains `nib.exe`, `install.ps1`, `README.md`, `LICENSE` and `VERSION.txt`.
+**The version comes from `<Version>` in [src/Nib/Nib.csproj](../src/Nib/Nib.csproj).**
+`-Version` is the only thing that writes it, and it cannot be combined with `-Tag`
+or `-Publish`: the bump has to be committed before the tag. `-p:Version=` is also
+passed to the publish, so the assembly (and `nib --version`) carries the version the
+release is named after.
 
-The script refuses to run from a dirty working tree (`-Force` overrides), refuses to
-overwrite a zip that already exists for that version (`-Force` again, and this is
-the guard that replaces "you had to type the number"), runs the tests, publishes,
-smoke-tests the staged exe with `--version` and `--soak`, then zips. `dist/` is
-gitignored.
+**The CHANGELOG owns the notes.** `-Tag` and `-Publish` stop unless the newest
+version section in [CHANGELOG.md](../CHANGELOG.md) matches the csproj, and that
+section becomes the GitHub release notes.
+
+The output is `release/nib-<version>.zip` plus a `.sha256` sidecar. The zip holds
+`nib.exe`, `install.ps1`, `uninstall.ps1`, `README.md`, `LICENSE` and
+`CHANGELOG.md`. `release/` and `publish/` are gitignored.
+
+`scripts/release.ps1` is a shared template and stays byte-identical to it. Everything
+nib-specific lives in [scripts/release.settings.psd1](../scripts/release.settings.psd1):
+project paths, the extra files in the zip, publish properties. Edit that, not the
+script.
+
+**Run it from PowerShell 7 (`pwsh`).** Windows PowerShell 5.1 started from a
+PowerShell 7 window inherits 7's module path and fails with *"The term
+'Import-PowerShellDataFile' is not recognized"*. The template does not guard against
+that yet; `install.ps1` and `uninstall.ps1` do.
 
 **Release publishes are self-contained; ordinary builds are not.** `SelfContained`
 stays `false` in the csproj because setting it there makes every `dotnet build`
 copy the whole runtime into `bin/`, which wrecks the dev loop. `release.ps1` passes
-it on the publish command line instead. The cost is size — expect **70–90 MB**
-against ~5 MB framework-dependent — and the benefit is that the zip runs anywhere
-with no prerequisites.
+it on the publish command line instead. The cost is size, about **70-90 MB** against
+~5 MB framework-dependent. The benefit is that the zip runs on a machine with no
+.NET installed.
 
 Two settings are deliberately absent, and adding them will cost you an afternoon:
 
-- **`PublishTrimmed`** — TextMateSharp resolves grammar rule types reflectively.
+- **`PublishTrimmed`**: TextMateSharp resolves grammar rule types reflectively.
   The trimmer strips them and the failure surfaces much later as a null grammar,
   not as a build error.
-- **`EnableCompressionInSingleFile`** — roughly halves the zip, but decompresses on
+- **`EnableCompressionInSingleFile`**: roughly halves the zip, but decompresses on
   *every* launch, and startup is already 135 ms against a sub-100 ms goal.
 
-Version comes from `<Version>` in [src/Nib/Nib.csproj](src/Nib/Nib.csproj);
-`release.ps1` overrides it with `-p:Version=`. Bump the csproj value when you cut a
-release so `nib --version` from a plain dev build isn't lying.
+The template has no smoke test of the published exe. The old nib-only script ran
+`nib --version` on the staged exe; it is kept in `scripts/old/` for reference.
+
+## Installing a release
+
+From the unzipped release folder:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -DryRun   # see what it will do
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Installs to `%LOCALAPPDATA%\Programs\nib` (no admin rights), appends that folder to
+the user PATH, and adds a Settings > Apps entry for the current user. Running it
+again upgrades in place. It refuses to run while nib is running from the install
+folder, because the copy would fail halfway and closing an editor for you could
+lose unsaved text. `-NoPath` skips PATH.
+
+To remove it: Settings > Apps > nib, or `uninstall.ps1` in the install folder. That
+removes the folder, the PATH entry and the uninstall entry, and keeps
+`%APPDATA%\nib\config.toml`.
+
+Both scripts write PATH through the registry with the value kind preserved. See
+"PowerShell landmines" in [CLAUDE.md](../CLAUDE.md) before you change that code.
 
 ## Tests
 
